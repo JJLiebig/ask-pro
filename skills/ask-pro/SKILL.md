@@ -129,6 +129,12 @@ sessions run with `--artifacts`, any provided `ask-pro-response.zip` is
 extracted under the session's `pro-output/` directory and described in
 `PRO_OUTPUT_MANIFEST.json`. Inline-default sessions should not expect a zip.
 
+`INCOMPLETE_ANSWER` / `stopped_without_answer` means ChatGPT stopped without
+an answer after ask-pro attempted one automatic `continue`. Present the caller
+with the emitted resume command or a full retry of the original request in a new
+chat, and wait for their choice. Do not automatically resume or retry this state.
+An explicit `--resume` allows one more continuation attempt.
+
 `COMPLETED` means harvest now; the run browser may already be closed. If the
 state is `INCOMPLETE_ANSWER` / `preamble_without_artifacts`, do not treat
 `ANSWER.md` as final. Try resume/harvest if recoverable; otherwise rerun with

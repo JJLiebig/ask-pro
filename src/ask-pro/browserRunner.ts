@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { BrowserAutomationError } from "../browser/errors.js";
+import { AssistantStoppedError, BrowserAutomationError } from "../browser/errors.js";
 import {
   askProAgentIdForLegacyBrowserProfileDir,
   askProAgentIdForManagedBrowserProfileDir,
@@ -287,6 +287,21 @@ async function runAskProBrowserSessionWithLease({
       throw new AskProNeedsAuthError(sessionId, browserProfile, classifyBrowserError(error));
     }
 
+    if (error instanceof AssistantStoppedError) {
+      await writeTerminalBrowserMetadata(
+        cwd,
+        sessionId,
+        "incomplete_answer",
+        "stopped_without_answer",
+      );
+      await updateAskProStatus({
+        cwd,
+        sessionId,
+        status: "INCOMPLETE_ANSWER",
+        reason: "stopped_without_answer",
+      });
+      throw error;
+    }
     if (isAssistantTimeoutError(error)) {
       await writeTerminalBrowserMetadata(cwd, sessionId, "wait_timed_out", "assistant_timeout");
       await updateAskProStatus({
@@ -518,6 +533,21 @@ async function resumeAskProBrowserSessionWithLease({
         reason: classifyBrowserError(error),
       });
       throw new AskProNeedsAuthError(sessionId, fallbackProfile, classifyBrowserError(error));
+    }
+    if (error instanceof AssistantStoppedError) {
+      await writeTerminalBrowserMetadata(
+        cwd,
+        sessionId,
+        "incomplete_answer",
+        "stopped_without_answer",
+      );
+      await updateAskProStatus({
+        cwd,
+        sessionId,
+        status: "INCOMPLETE_ANSWER",
+        reason: "stopped_without_answer",
+      });
+      throw error;
     }
     if (isAssistantTimeoutError(error)) {
       await writeTerminalBrowserMetadata(cwd, sessionId, "wait_timed_out", "assistant_timeout");
@@ -778,7 +808,7 @@ function authFailureChromeMode(chromeMode: AskProBrowserMetadata["chromeMode"]) 
 async function writeTerminalBrowserMetadata(
   cwd: string,
   sessionId: string,
-  status: "failed" | "wait_timed_out",
+  status: "failed" | "wait_timed_out" | "incomplete_answer",
   reason: string,
 ): Promise<void> {
   const paths = getAskProSessionPaths(cwd, sessionId);
@@ -786,7 +816,7 @@ async function writeTerminalBrowserMetadata(
   if (!current) return;
   const { chromeMode, ...rest } = current;
   const terminalChromeMode =
-    status === "wait_timed_out" && chromeMode === "reattaching"
+    status !== "failed" && chromeMode === "reattaching"
       ? "reused_devtools"
       : chromeMode === "launched" || chromeMode === "reused_devtools" || chromeMode === "relaunched"
         ? chromeMode
@@ -899,7 +929,7 @@ function buildAskProBrowserLogger(
     if (typeof message !== "string") return;
     void appendAskProLog(cwd, sessionId, message);
     const shouldPrint =
-      verbose || /\b(thinking|waiting|fallback|retry|url|reattach)\b/i.test(message);
+      verbose || /\b(thinking|waiting|fallback|retry|stopped|url|reattach)\b/i.test(message);
     if (shouldPrint) {
       console.error(message);
     }

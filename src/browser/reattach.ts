@@ -1,3 +1,5 @@
+import { AssistantStoppedError } from "./errors.js";
+import { createAssistantContinuation } from "./actions/assistantResponse.js";
 import CDP from "chrome-remote-interface";
 import type { LaunchedChrome } from "chrome-launcher";
 import os from "node:os";
@@ -65,6 +67,7 @@ import {
 
 type BrowserSessionConfig = BrowserAutomationConfig;
 export interface ReattachDeps {
+  continuationState?: { used: boolean };
   listTargets?: () => Promise<TargetInfoLite[]>;
   connect?: (options?: unknown) => Promise<ChromeClient>;
   chromeModeCb?: (mode: ReattachResult["chromeMode"]) => Promise<void> | void;
@@ -186,6 +189,7 @@ export async function resumeBrowserSession(
   logger: BrowserLogger,
   deps: ReattachDeps = {},
 ): Promise<ReattachResult> {
+  deps = { ...deps, continuationState: deps.continuationState ?? { used: false } };
   const recoverSession =
     deps.recoverSession ??
     (async (runtimeMeta, configMeta) =>
@@ -336,7 +340,14 @@ export async function resumeBrowserSession(
     const minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     const promptEcho = buildPromptEchoMatcher(deps.promptPreview);
     const answer = await withTimeout(
-      waitForResponse(Runtime, timeoutMs, logger, minTurnIndex ?? undefined),
+      waitForResponse(
+        Runtime,
+        timeoutMs,
+        logger,
+        minTurnIndex ?? undefined,
+        runtime.conversationId,
+        createAssistantContinuation(Runtime, Input, logger, undefined, deps.continuationState),
+      ),
       timeoutMs + 5_000,
       "Reattach response timed out",
     );
@@ -405,6 +416,7 @@ export async function resumeBrowserSession(
     await closeConnection?.().catch(() => undefined);
     await releaseReattachRunLease(reattachRunLease, logger);
     reattachRunLease = null;
+    if (error instanceof AssistantStoppedError) throw error;
     const message = error instanceof Error ? error.message : String(error);
     logger(
       `Existing Chrome reattach failed (${message}); reopening browser to locate the session.`,
@@ -652,7 +664,14 @@ async function resumeBrowserSessionViaNewChrome(
     const timeoutMs = resolved.timeoutMs ?? 120_000;
     const minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     const promptEcho = buildPromptEchoMatcher(deps.promptPreview);
-    const answer = await waitForResponse(Runtime, timeoutMs, logger, minTurnIndex ?? undefined);
+    const answer = await waitForResponse(
+      Runtime,
+      timeoutMs,
+      logger,
+      minTurnIndex ?? undefined,
+      runtime.conversationId,
+      createAssistantContinuation(Runtime, client.Input, logger, undefined, deps.continuationState),
+    );
     const recovered = await recoverPromptEcho(
       Runtime,
       answer,

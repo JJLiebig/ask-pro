@@ -329,50 +329,57 @@ describe("ask-pro cli", () => {
     );
   }, 30000);
 
-  test("harvest does not promote incomplete preamble answers", async () => {
-    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-harvest-incomplete-"));
-    tempDirs.push(cwd);
+  test.each(["preamble_without_artifacts", "stopped_without_answer"])(
+    "harvest preserves caller recovery choice: %s",
+    async (reason) => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-harvest-incomplete-"));
+      tempDirs.push(cwd);
 
-    const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
-    const tsxLoader = pathToFileURL(
-      path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
-    ).href;
-    await execFileAsync(
-      process.execPath,
-      ["--import", tsxLoader, cli, "--dry-run", "Review this."],
-      { cwd },
-    );
+      const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
+      const tsxLoader = pathToFileURL(
+        path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
+      ).href;
+      await execFileAsync(
+        process.execPath,
+        ["--import", tsxLoader, cli, "--dry-run", "Review this."],
+        { cwd },
+      );
 
-    const sessions = await fs.readdir(path.join(cwd, ".ask-pro", "sessions"));
-    const sessionDir = path.join(cwd, ".ask-pro", "sessions", sessions[0]!);
-    const statusPath = path.join(sessionDir, "status.json");
-    const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
-    await fs.writeFile(
-      statusPath,
-      `${JSON.stringify(
-        { ...status, status: "INCOMPLETE_ANSWER", reason: "preamble_without_artifacts" },
-        null,
-        2,
-      )}\n`,
-      "utf8",
-    );
-    await fs.writeFile(
-      path.join(sessionDir, "ANSWER.md"),
-      "I'll inspect the bundle and create the files.\n",
-      "utf8",
-    );
+      const sessions = await fs.readdir(path.join(cwd, ".ask-pro", "sessions"));
+      const sessionDir = path.join(cwd, ".ask-pro", "sessions", sessions[0]!);
+      const statusPath = path.join(sessionDir, "status.json");
+      const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
+      await fs.writeFile(
+        statusPath,
+        `${JSON.stringify({ ...status, status: "INCOMPLETE_ANSWER", reason }, null, 2)}\n`,
+        "utf8",
+      );
+      await fs.writeFile(
+        path.join(sessionDir, "ANSWER.md"),
+        "I'll inspect the bundle and create the files.\n",
+        "utf8",
+      );
 
-    const { stdout } = await execFileAsync(
-      process.execPath,
-      ["--import", tsxLoader, cli, "--harvest"],
-      { cwd },
-    );
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        ["--import", tsxLoader, cli, "--harvest"],
+        { cwd },
+      );
 
-    expect(stdout).toContain("  state: incomplete_answer\n");
-    expect(stdout).toContain("  reason: preamble_without_artifacts\n");
-    const updated = JSON.parse(await fs.readFile(statusPath, "utf8"));
-    expect(updated.status).toBe("INCOMPLETE_ANSWER");
-  }, 30000);
+      expect(stdout).toContain("  state: incomplete_answer\n");
+      expect(stdout).toContain(`  reason: ${reason}\n`);
+      if (reason === "stopped_without_answer") {
+        expect(stdout).toContain("  action: choose_resume_or_retry\n");
+        expect(stdout).toContain("--resume");
+        expect(stdout).toContain(
+          "Run the original request again without --resume to start a new chat.",
+        );
+      }
+      const updated = JSON.parse(await fs.readFile(statusPath, "utf8"));
+      expect(updated.status).toBe("INCOMPLETE_ANSWER");
+    },
+    30000,
+  );
 
   test("harvest does not recover suspicious preambles from stale waiting status", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-harvest-stale-preamble-"));

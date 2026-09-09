@@ -1,3 +1,4 @@
+import { AssistantStoppedError } from "../../src/browser/errors.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -864,7 +865,18 @@ describe("ask-pro browser runner", () => {
     expect(metadata.chromeMode).toBeUndefined();
   });
 
-  test("preserves launched Chrome mode for resumable assistant timeouts", async () => {
+  test.each([
+    {
+      error: new Error("assistant response timed out"),
+      status: "wait_timed_out",
+      reason: "assistant_timeout",
+    },
+    {
+      error: new AssistantStoppedError(3),
+      status: "incomplete_answer",
+      reason: "stopped_without_answer",
+    },
+  ])("preserves launched Chrome for recoverable failures: $reason", async (failure) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-run-timeout-preflight-"));
     tempDirs.push(cwd);
     const session = await createAskProSession({
@@ -880,20 +892,22 @@ describe("ask-pro browser runner", () => {
         chromeHost: "127.0.0.1",
         chromeTargetId: "timeout-target",
       });
-      throw new Error("assistant response timed out");
+      throw failure.error;
     });
 
     await expect(runAskProBrowserSession({ cwd, sessionId: session.id })).rejects.toThrow(
-      /assistant response timed out/,
+      failure.error,
     );
 
     const metadata = JSON.parse(
       await fs.readFile(path.join(session.dir, "browser.json"), "utf8"),
     ) as { status?: string; chromeMode?: string; reason?: string };
+    const { status } = await readAskProStatus({ cwd, sessionId: session.id });
+    expect(status).toMatchObject({ status: failure.status.toUpperCase(), reason: failure.reason });
     expect(metadata).toMatchObject({
-      status: "wait_timed_out",
+      status: failure.status,
       chromeMode: "launched",
-      reason: "assistant_timeout",
+      reason: failure.reason,
     });
   });
 
@@ -1481,7 +1495,18 @@ describe("ask-pro browser runner", () => {
     expect(metadata.chromeMode).toBeUndefined();
   });
 
-  test("reattach assistant timeout remains resumable", async () => {
+  test.each([
+    {
+      error: new Error("assistant response timed out"),
+      status: "WAIT_TIMED_OUT",
+      reason: "assistant_timeout",
+    },
+    {
+      error: new AssistantStoppedError(3),
+      status: "INCOMPLETE_ANSWER",
+      reason: "stopped_without_answer",
+    },
+  ])("reattach failure remains resumable: $reason", async (failure) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-timeout-"));
     tempDirs.push(cwd);
     const session = await createAskProSession({
@@ -1506,21 +1531,21 @@ describe("ask-pro browser runner", () => {
       },
     });
     await updateAskProStatus({ cwd, sessionId: session.id, status: "WAIT_TIMED_OUT" });
-    resumeBrowserSessionMock.mockRejectedValueOnce(new Error("assistant response timed out"));
+    resumeBrowserSessionMock.mockRejectedValueOnce(failure.error);
 
     await expect(resumeAskProBrowserSession({ cwd, sessionId: session.id })).rejects.toThrow(
-      /assistant response timed out/,
+      failure.error,
     );
 
     const { status } = await readAskProStatus({ cwd, sessionId: session.id });
-    expect(status.status).toBe("WAIT_TIMED_OUT");
+    expect(status.status).toBe(failure.status);
     const metadata = JSON.parse(
       await fs.readFile(path.join(session.dir, "browser.json"), "utf8"),
     ) as { status?: string; chromeMode?: string; reason?: string };
     expect(metadata).toMatchObject({
-      status: "wait_timed_out",
+      status: failure.status.toLowerCase(),
       chromeMode: "reused_devtools",
-      reason: "assistant_timeout",
+      reason: failure.reason,
     });
   });
 

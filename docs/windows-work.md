@@ -58,4 +58,10 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 - The old Oracle API, MCP, Gemini, TUI, bridge, and remote-service paths are not
   V1 requirements in this fork.
 
+- A latest assistant turn containing only `Stopped thinking`, with no active stop
+  control, triggers one automatic `continue`. Managed runs disable the input guard
+  for that submission and restore it afterward. A second stop preserves the chat
+  and returns `INCOMPLETE_ANSWER` / `stopped_without_answer`; explicit `--resume`
+  grants one more continuation attempt. Elapsed thinking time alone is not a stop.
+
 Future Windows gotchas belong here.

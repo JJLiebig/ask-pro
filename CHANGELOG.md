@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- Send "continue" once when ChatGPT stops without an answer. If it stops again,
+  return control with a choice to resume the conversation or retry in a new chat.
+
 - Reacquire the managed ChatGPT tab and DevTools endpoint after manual sign-in
   instead of reporting a replaced login target as a user-closed Chrome window.
 - Hide ordinary managed Chrome windows from the Windows desktop after isolated

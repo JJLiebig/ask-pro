@@ -10,8 +10,48 @@ import {
 import { delay } from "../utils.js";
 import { logDomFailure } from "../domDebug.js";
 import { buildClickDispatcher } from "./domEvents.js";
+import { AssistantStoppedError } from "../errors.js";
+import { submitPrompt } from "./promptComposer.js";
+import type { PostSubmitInputGuard } from "./inputGuard.js";
 
 const ASSISTANT_POLL_TIMEOUT_ERROR = "assistant-response-watchdog-timeout";
+
+export function createAssistantContinuation(
+  Runtime: ChromeClient["Runtime"],
+  Input: ChromeClient["Input"],
+  logger: BrowserLogger,
+  inputGuard?: PostSubmitInputGuard | null,
+  state = { used: false },
+): (turnIndex: number) => Promise<number> {
+  return async (turnIndex) => {
+    if (state.used) throw new AssistantStoppedError(turnIndex);
+    // A failed/ambiguous send must not trigger another automatic paid attempt.
+    state.used = true;
+    const { result } = await Runtime.evaluate({
+      expression: `Array.from(document.querySelectorAll('#prompt-textarea, textarea[name="prompt-textarea"]')).some(e => (e.value || e.textContent || '').trim())`,
+      returnByValue: true,
+    });
+    if (result.value || (inputGuard && !(await inputGuard.disable()))) {
+      throw new AssistantStoppedError(turnIndex);
+    }
+    logger('ChatGPT stopped without an answer; sending "continue" once.');
+    try {
+      await submitPrompt(
+        {
+          runtime: Runtime,
+          input: Input,
+          baselineTurns: turnIndex + 1,
+          afterSubmit: inputGuard ? () => inputGuard.enable() : undefined,
+        },
+        "continue",
+        logger,
+      );
+    } catch {
+      throw new AssistantStoppedError(turnIndex);
+    }
+    return turnIndex + 1;
+  };
+}
 
 function isTransientAssistantPlaceholderText(normalized: string): boolean {
   const text = normalized.replace(/\s+/g, " ").trim();
@@ -19,6 +59,7 @@ function isTransientAssistantPlaceholderText(normalized: string): boolean {
   // Learned: "Pro thinking" shows a placeholder turn that contains "Answer now".
   // That is not the final answer and must be ignored in browser automation.
   if (text === "chatgpt said:" || text === "chatgpt said") return true;
+  if (/^(chatgpt said:\s*)?stopped thinking$/.test(text)) return true;
   if (
     text.includes("file upload request") &&
     (text.includes("pro thinking") || text.includes("chatgpt said"))
@@ -49,6 +90,35 @@ function isTransientAssistantPlaceholderText(normalized: string): boolean {
 }
 
 export async function waitForAssistantResponse(
+  Runtime: ChromeClient["Runtime"],
+  timeoutMs: number,
+  logger: BrowserLogger,
+  minTurnIndex?: number,
+  expectedConversationId?: string,
+  continueResponse?: (turnIndex: number) => Promise<number>,
+): Promise<Awaited<ReturnType<typeof waitForAssistantResponseOnce>>> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      return await waitForAssistantResponseOnce(
+        Runtime,
+        Math.max(1, deadline - Date.now()),
+        logger,
+        minTurnIndex,
+        expectedConversationId,
+      );
+    } catch (error) {
+      if (!(error instanceof AssistantStoppedError)) throw error;
+      await Runtime.evaluate({
+        expression: "window.__askProCancelResponseObserver?.()",
+      }).catch(() => undefined);
+      if (!continueResponse || Date.now() >= deadline) throw error;
+      minTurnIndex = await continueResponse(error.turnIndex);
+    }
+  }
+}
+
+async function waitForAssistantResponseOnce(
   Runtime: ChromeClient["Runtime"],
   timeoutMs: number,
   logger: BrowserLogger,
@@ -126,6 +196,7 @@ export async function waitForAssistantResponse(
       ) {
         evaluation = await evaluationPromise;
       } else if (source === "poll") {
+        pollerAbort.abort();
         throw error;
       } else if (source === "evaluation") {
         const recovered = await recoverAssistantResponse(
@@ -327,6 +398,9 @@ async function parseAssistantEvaluationResult(
   meta: { turnId?: string | null; messageId?: string | null };
 } | null> {
   const { result } = evaluation;
+  if (result.value?.stoppedWithoutAnswer) {
+    throw new AssistantStoppedError(result.value.turnIndex);
+  }
   if (
     result.type === "object" &&
     result.value &&
@@ -562,6 +636,9 @@ function normalizeAssistantSnapshot(snapshot: AssistantSnapshot | null): {
   html?: string;
   meta: { turnId?: string | null; messageId?: string | null };
 } | null {
+  if (snapshot?.stoppedWithoutAnswer && typeof snapshot.turnIndex === "number") {
+    throw new AssistantStoppedError(snapshot.turnIndex);
+  }
   const text = snapshot?.text ? cleanAssistantText(snapshot.text) : "";
   if (!text.trim()) {
     return null;
@@ -626,6 +703,7 @@ function buildAssistantSnapshotExpression(
     // Learned: the default turn DOM misses project view; keep a fallback extractor.
     ${buildAssistantExtractor("extractAssistantTurn")}
     const extracted = extractAssistantTurn();
+    if (extracted?.stoppedWithoutAnswer) return extracted;
     ${buildAssistantPlaceholderPredicate("isPlaceholder")}
     if (extracted && extracted.text && !isPlaceholder(extracted)) {
       return extracted;
@@ -715,6 +793,7 @@ function buildResponseObserverExpression(
         const cleanup = () => {
           if (cleanedUp) return;
           cleanedUp = true;
+          delete window.__askProCancelResponseObserver;
           if (timeoutId) {
             clearTimeout(timeoutId);
             timeoutId = null;
@@ -728,6 +807,8 @@ function buildResponseObserverExpression(
             observer = null;
           }
         };
+
+        window.__askProCancelResponseObserver = () => { cleanup(); resolve(null); };
 
         const observerCallback = () => {
           if (cleanedUp) return;
@@ -783,6 +864,7 @@ function buildResponseObserverExpression(
     };
 
     const waitForSettle = async (snapshot) => {
+      if (snapshot?.stoppedWithoutAnswer) return snapshot;
       // Learned: short answers can be 1-2 tokens; enforce longer settle windows to avoid truncation.
       // Learned: long streaming responses (esp. thinking models) can pause mid-stream;
       // use progressively longer windows to avoid truncation (#71).
@@ -908,6 +990,14 @@ function buildAssistantExtractor(functionName: string): string {
         continue;
       }
       const messageRoot = turn.querySelector(ASSISTANT_SELECTOR) ?? turn;
+      const turnText = (turn.innerText || turn.textContent || '').replace(/^\\s*ChatGPT said:\\s*/i, '').trim();
+      const stopped = Array.from(turn.querySelectorAll('button')).some(
+        button => (button.textContent || '').trim().toLowerCase() === 'stopped thinking',
+      );
+      if (index === turns.length - 1 && stopped && turnText.toLowerCase() === 'stopped thinking' &&
+          !document.querySelector('${STOP_BUTTON_SELECTOR}')) {
+        return { text: '', stoppedWithoutAnswer: true, turnIndex: index };
+      }
       expandCollapsibles(messageRoot);
       const selectors = [
         '.markdown',
@@ -958,6 +1048,7 @@ function buildAssistantPlaceholderPredicate(functionName: string): string {
     const normalized = String(snapshot?.text ?? snapshot ?? '').toLowerCase().replace(/\\s+/g, ' ').trim();
     if (!normalized) return false;
     if (normalized === 'chatgpt said:' || normalized === 'chatgpt said') return true;
+    if (/^(chatgpt said:\\s*)?stopped thinking$/.test(normalized)) return true;
     if (
       normalized.includes('file upload request') &&
       (normalized.includes('pro thinking') || normalized.includes('chatgpt said'))
@@ -1330,6 +1421,7 @@ function buildCopyExpression(meta: { messageId?: string | null; turnId?: string 
 }
 
 interface AssistantSnapshot {
+  stoppedWithoutAnswer?: boolean;
   text?: string;
   html?: string;
   messageId?: string | null;
