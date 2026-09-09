@@ -9,7 +9,10 @@ import { AssistantStoppedError } from "../../src/browser/errors.js";
 import { submitPrompt } from "../../src/browser/actions/promptComposer.js";
 import type { BrowserLogger, ChromeClient } from "../../src/browser/types.js";
 
-vi.mock("../../src/browser/actions/promptComposer.js", () => ({ submitPrompt: vi.fn() }));
+vi.mock("../../src/browser/actions/promptComposer.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/browser/actions/promptComposer.js")>()),
+  submitPrompt: vi.fn(),
+}));
 
 afterEach(() => {
   vi.useRealTimers();
@@ -146,19 +149,52 @@ describe("assistant response actions", () => {
     }
   });
 
-  test("does not append continue to a draft or retry an uncertain send", async () => {
+  test.each([".ProseMirror", 'textarea[aria-label="Message ChatGPT"]'])(
+    "preserves a draft in fallback composer %s",
+    async (selector) => {
+      class TextArea {
+        value = "Unsent draft";
+        innerText = "Unsent draft";
+        getBoundingClientRect() {
+          return { width: 100, height: 40 };
+        }
+        getAttribute() {
+          return null;
+        }
+      }
+      const node = new TextArea();
+      const runtime = {
+        evaluate: async ({ expression }: { expression: string }) => ({
+          result: {
+            value: new Function(
+              "document",
+              "HTMLTextAreaElement",
+              "HTMLInputElement",
+              `return ${expression}`,
+            )(
+              { querySelector: (candidate: string) => (candidate === selector ? node : null) },
+              selector.startsWith("textarea") ? TextArea : class {},
+              class {},
+            ),
+          },
+        }),
+      } as unknown as ChromeClient["Runtime"];
+      const logger = vi.fn() as unknown as BrowserLogger;
+      await expect(
+        createAssistantContinuation(runtime, {} as ChromeClient["Input"], logger)(1),
+      ).rejects.toBeInstanceOf(AssistantStoppedError);
+      expect(submitPrompt).not.toHaveBeenCalled();
+      expect(node.value).toBe("Unsent draft");
+    },
+  );
+
+  test("does not retry an uncertain send", async () => {
     const runtime = {
-      evaluate: vi.fn().mockResolvedValue({ result: { value: true } }),
+      evaluate: vi.fn().mockResolvedValue({ result: { value: {} } }),
     } as unknown as ChromeClient["Runtime"];
     const logger = vi.fn() as unknown as BrowserLogger;
-    const input = {} as ChromeClient["Input"];
-    await expect(createAssistantContinuation(runtime, input, logger)(1)).rejects.toBeInstanceOf(
-      AssistantStoppedError,
-    );
-    expect(submitPrompt).not.toHaveBeenCalled();
-    vi.mocked(runtime.evaluate).mockResolvedValue({ result: { value: false } } as never);
     vi.mocked(submitPrompt).mockRejectedValueOnce(new Error("Disconnected during send"));
-    const continuation = createAssistantContinuation(runtime, input, logger);
+    const continuation = createAssistantContinuation(runtime, {} as ChromeClient["Input"], logger);
     await expect(continuation(1)).rejects.toBeInstanceOf(AssistantStoppedError);
     await expect(continuation(1)).rejects.toBeInstanceOf(AssistantStoppedError);
     expect(submitPrompt).toHaveBeenCalledOnce();

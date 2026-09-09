@@ -11,7 +11,7 @@ import { delay } from "../utils.js";
 import { logDomFailure } from "../domDebug.js";
 import { buildClickDispatcher } from "./domEvents.js";
 import { AssistantStoppedError } from "../errors.js";
-import { submitPrompt } from "./promptComposer.js";
+import { readComposerSnapshot, submitPrompt } from "./promptComposer.js";
 import type { PostSubmitInputGuard } from "./inputGuard.js";
 
 const ASSISTANT_POLL_TIMEOUT_ERROR = "assistant-response-watchdog-timeout";
@@ -27,11 +27,8 @@ export function createAssistantContinuation(
     if (state.used) throw new AssistantStoppedError(turnIndex);
     // A failed/ambiguous send must not trigger another automatic paid attempt.
     state.used = true;
-    const { result } = await Runtime.evaluate({
-      expression: `Array.from(document.querySelectorAll('#prompt-textarea, textarea[name="prompt-textarea"]')).some(e => (e.value || e.textContent || '').trim())`,
-      returnByValue: true,
-    });
-    if (result.value || (inputGuard && !(await inputGuard.disable()))) {
+    const composer = await readComposerSnapshot(Runtime);
+    if (composer.activeValue.trim() || (inputGuard && !(await inputGuard.disable()))) {
       throw new AssistantStoppedError(turnIndex);
     }
     logger('ChatGPT stopped without an answer; sending "continue" once.');

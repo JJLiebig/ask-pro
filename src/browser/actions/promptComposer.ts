@@ -116,7 +116,9 @@ function buildComposerSnapshotExpression(): string {
   })()`;
 }
 
-async function readComposerSnapshot(runtime: ChromeClient["Runtime"]): Promise<ComposerSnapshot> {
+export async function readComposerSnapshot(
+  runtime: ChromeClient["Runtime"],
+): Promise<ComposerSnapshot> {
   const result = await runtime.evaluate({
     expression: buildComposerSnapshotExpression(),
     returnByValue: true,
