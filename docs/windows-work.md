@@ -41,7 +41,7 @@ Read this when working on `ask_pro` from Windows and add new findings here.
   20 seconds, and force-terminates the process only if Chrome does not exit.
 - Mutable session metadata retries transient Windows `EPERM` and `EBUSY`
   replacement failures before reporting an error.
-- The GPT-5.6 ChatGPT picker exposes `GPT-5.6 Sol` under Advanced > Model and a
+- The ChatGPT picker exposes `Latest` under Advanced > Model and a
   five-step reasoning-effort slider with `Pro` at the maximum. ask-pro selects
   or confirms both before submission.
 - Ordinary managed Chrome runs start minimized, then hide the native Windows
@@ -65,3 +65,8 @@ Read this when working on `ask_pro` from Windows and add new findings here.
   grants one more continuation attempt. Elapsed thinking time alone is not a stop.
 
 Future Windows gotchas belong here.
+
+- September 10: the model picker exposes `Latest` (currently `6 Pro`). Select the
+  literal `Latest` option and keep the reasoning slider on `Pro`. Tool work appears
+  inside `[data-streaming-response-status]`; it is progress, not answer content.
+  Refreshing the plugin leaves existing immutable session runtimes running.

@@ -243,6 +243,9 @@ function buildThinkingStatusExpression(): string {
         source: 'inline',
       };
     }
+    if (hasControl('stop answering')) {
+      return { message: 'active', source: 'inline' };
+    }
     const looksLikeThinking = (node) => {
       const label = labelFor(node);
       return (

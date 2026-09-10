@@ -299,6 +299,8 @@ function buildModelSelectionExpression(
       return { status: 'already-selected', label };
     }
     const buttonMatchesTarget = () => {
+      // The numbered pill cannot prove that the rolling Latest option is selected.
+      if (normalizedTarget === 'latest') return false;
       const normalizedLabel = normalize(getButtonLabel());
       if (!normalizedLabel) return false;
       if (matchesVisibleAlias(normalizedLabel)) return true;
@@ -352,6 +354,7 @@ function buildModelSelectionExpression(
     };
 
     const scoreOption = (normalizedText, testid) => {
+      if (normalizedTarget === 'latest') return normalizedText === 'latest' ? 1000 : 0;
       // Assign a score to every node so we can pick the most likely match without brittle equality checks.
       if (!normalizedText && !testid) {
         return 0;
@@ -523,6 +526,13 @@ function buildModelSelectionExpression(
           await openDelay();
         }
         ensureMenuOpen();
+        if (normalizedTarget === 'latest') {
+          const modelView = document.querySelector('[role="menuitem"][aria-label="Select model"][aria-expanded="false"]');
+          if (modelView) {
+            dispatchClickSequence(modelView);
+            await openDelay();
+          }
+        }
         const match = findBestOption();
         if (match) {
           if (optionIsSelected(match.node)) {

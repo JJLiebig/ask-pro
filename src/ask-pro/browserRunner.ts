@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { DEFAULT_CHATGPT_BROWSER_MODEL_LABEL } from "../browser/chatgptModelCatalog.js";
 import { AssistantStoppedError, BrowserAutomationError } from "../browser/errors.js";
 import {
   askProAgentIdForLegacyBrowserProfileDir,
@@ -114,7 +115,7 @@ async function runAskProBrowserSessionWithLease({
         inputTimeoutMs: 90_000,
         assistantRecheckDelayMs: 30_000,
         assistantRecheckTimeoutMs: 180_000,
-        desiredModel: "GPT-5.6 Sol",
+        desiredModel: DEFAULT_CHATGPT_BROWSER_MODEL_LABEL,
         modelStrategy: "select",
         thinkingTime: "pro",
         acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
@@ -431,7 +432,7 @@ async function resumeAskProBrowserSessionWithLease({
         inputTimeoutMs: 90_000,
         acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
         url: chatgptUrl,
-        desiredModel: "GPT-5.6 Sol",
+        desiredModel: DEFAULT_CHATGPT_BROWSER_MODEL_LABEL,
         thinkingTime: "pro",
         startMinimized: false,
       },
@@ -628,7 +629,9 @@ function isTemporaryProUnavailableError(error: unknown): boolean {
   const message =
     error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return (
-    message.includes('unable to find model option matching "gpt-5.6 sol"') ||
+    message.includes(
+      `unable to find model option matching "${DEFAULT_CHATGPT_BROWSER_MODEL_LABEL.toLowerCase()}"`,
+    ) ||
     message.includes("unable to locate the chatgpt model selector button") ||
     message.includes("unable to select pro intelligence")
   );

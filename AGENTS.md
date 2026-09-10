@@ -12,7 +12,7 @@ ask_pro-specific notes:
   MFA codes, recovery codes, session cookies, or raw auth tokens.
 - Browser “Pro thinking” gate: never click or auto-click ChatGPT's `Answer now`
   button. Treat it as a placeholder and wait for the real assistant response.
-- Current ChatGPT UI note: select `GPT-5.6 Sol` under Advanced > Model, then set
+- Current ChatGPT UI note: select `Latest` under Advanced > Model, then set
   the five-step reasoning-effort slider to `Pro`. Temporary chat can be a
   top-right checkbox/toggle. Fresh default runs
   try Temporary Chat and fall back to normal ChatGPT when Pro is hidden; use

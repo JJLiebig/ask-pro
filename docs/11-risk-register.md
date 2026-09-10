@@ -21,13 +21,13 @@ Mitigation:
 - human logs in manually
 - never automate credentials
 
-## GPT-5.6 Sol / Pro intelligence unavailable
+## Latest / Pro intelligence unavailable
 
 Risk: the selected model or Pro intelligence target is missing.
 
 Mitigation:
 
-- select GPT-5.6 Sol before Pro intelligence
+- select Latest before Pro intelligence
 - do not submit if the required model is unavailable
 - log selected visible label
 

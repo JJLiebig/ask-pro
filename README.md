@@ -88,7 +88,7 @@ Ask for an inline markdown consult:
 ask-pro --no-temporary --prompt-file question.md --files src --files tests
 ```
 
-The browser flow selects `GPT-5.6 Sol`, then `Pro` intelligence automatically.
+The browser flow selects `Latest`, then `Pro` intelligence automatically.
 
 Request generated files only when you really need an implementation package:
 

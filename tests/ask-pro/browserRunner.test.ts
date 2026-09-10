@@ -274,7 +274,7 @@ describe("ask-pro browser runner", () => {
       config: {
         url: "https://chatgpt.com/?temporary-chat=true",
         attachRunning: false,
-        desiredModel: "GPT-5.6 Sol",
+        desiredModel: "Latest",
         thinkingTime: "pro",
         manualLoginProfileDir: expect.stringMatching(
           /agents[\\/]+review-t1-[a-f0-9]{10}[\\/]+browser-profile$/,
@@ -300,7 +300,7 @@ describe("ask-pro browser runner", () => {
       config: {
         url: "https://chatgpt.com/?temporary-chat=true",
         attachRunning: false,
-        desiredModel: "GPT-5.6 Sol",
+        desiredModel: "Latest",
         thinkingTime: "pro",
         manualLoginProfileDir: testSharedProfileDir(),
       },
@@ -616,7 +616,7 @@ describe("ask-pro browser runner", () => {
     )?.shouldPreserveWindowStateOnError;
     expect(
       shouldPreserveWindowStateOnError?.(
-        new Error('Unable to find model option matching "GPT-5.6 Sol" in the model switcher.'),
+        new Error('Unable to find model option matching "Latest" in the model switcher.'),
       ),
     ).toBe(false);
     const metadata = JSON.parse(
@@ -636,7 +636,7 @@ describe("ask-pro browser runner", () => {
     });
     runBrowserModeMock
       .mockRejectedValueOnce(
-        new Error('Unable to find model option matching "GPT-5.6 Sol" in the model switcher.'),
+        new Error('Unable to find model option matching "Latest" in the model switcher.'),
       )
       .mockResolvedValueOnce({
         answerText: "agent answer",
@@ -659,7 +659,7 @@ describe("ask-pro browser runner", () => {
     )?.shouldPreserveWindowStateOnError;
     expect(
       shouldPreserveWindowStateOnError?.(
-        new Error('Unable to find model option matching "GPT-5.6 Sol" in the model switcher.'),
+        new Error('Unable to find model option matching "Latest" in the model switcher.'),
       ),
     ).toBe(true);
     expect(shouldPreserveWindowStateOnError?.(new Error("attachment upload failed"))).toBe(false);
@@ -710,7 +710,7 @@ describe("ask-pro browser runner", () => {
     expect(secondCall?.[0]).toMatchObject({
       config: {
         url: "https://chatgpt.com/",
-        desiredModel: "GPT-5.6 Sol",
+        desiredModel: "Latest",
         thinkingTime: "pro",
       },
     });
@@ -733,9 +733,7 @@ describe("ask-pro browser runner", () => {
           chromeHost: "127.0.0.1",
           chromeTargetId: "temp-target",
         });
-        throw new Error(
-          'Unable to find model option matching "GPT-5.6 Sol" in the model switcher.',
-        );
+        throw new Error('Unable to find model option matching "Latest" in the model switcher.');
       })
       .mockResolvedValueOnce({
         answerText: "agent answer",
@@ -823,12 +821,12 @@ describe("ask-pro browser runner", () => {
       dryRun: false,
     });
     runBrowserModeMock.mockRejectedValueOnce(
-      new Error('Unable to find model option matching "GPT-5.6 Sol" in the model switcher.'),
+      new Error('Unable to find model option matching "Latest" in the model switcher.'),
     );
 
     await expect(
       runAskProBrowserSession({ cwd, sessionId: session.id, temporary: true }),
-    ).rejects.toThrow(/GPT-5\.6 Sol/);
+    ).rejects.toThrow(/Latest/);
 
     expect(runBrowserModeMock).toHaveBeenCalledTimes(1);
     const firstCall = runBrowserModeMock.mock.calls[0] as unknown[] | undefined;
@@ -998,7 +996,7 @@ describe("ask-pro browser runner", () => {
     runBrowserModeMock
       .mockRejectedValueOnce(
         new Error(
-          'Unable to find model option matching "GPT-5.6 Sol" in the model switcher. Temporary Chat mode is active; verify the model picker exposes Pro in the current account/UI.',
+          'Unable to find model option matching "Latest" in the model switcher. Temporary Chat mode is active; verify the model picker exposes Pro in the current account/UI.',
         ),
       )
       .mockResolvedValueOnce({
@@ -1048,7 +1046,7 @@ describe("ask-pro browser runner", () => {
     await updateAskProStatus({ cwd, sessionId: session.id, status: "NEEDS_USER_AUTH" });
     runBrowserModeMock.mockRejectedValueOnce(
       new Error(
-        'Unable to find model option matching "GPT-5.6 Sol" in the model switcher. Temporary Chat mode is active; verify the model picker exposes Pro in the current account/UI.',
+        'Unable to find model option matching "Latest" in the model switcher. Temporary Chat mode is active; verify the model picker exposes Pro in the current account/UI.',
       ),
     );
 
@@ -1374,7 +1372,7 @@ describe("ask-pro browser runner", () => {
     expect(manifest.responseZip.status).toBe("error");
   });
 
-  test("reattach selects GPT-5.6 Sol Pro intelligence", async () => {
+  test("reattach selects Latest Pro intelligence", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-pro-"));
     tempDirs.push(cwd);
     const session = await createAskProSession({
@@ -1403,7 +1401,7 @@ describe("ask-pro browser runner", () => {
 
     const firstCall = resumeBrowserSessionMock.mock.calls[0] as unknown[] | undefined;
     expect(firstCall?.[1]).toMatchObject({
-      desiredModel: "GPT-5.6 Sol",
+      desiredModel: "Latest",
       thinkingTime: "pro",
     });
     const metadata = JSON.parse(
@@ -1714,7 +1712,7 @@ describe("ask-pro browser runner", () => {
       config: {
         manualLoginProfileDir: testSharedProfileDir(),
         startMinimized: false,
-        desiredModel: "GPT-5.6 Sol",
+        desiredModel: "Latest",
         thinkingTime: "pro",
         url: "https://chatgpt.com/",
       },

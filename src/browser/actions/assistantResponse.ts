@@ -256,15 +256,10 @@ async function waitForAssistantResponseOnce(
     expectedConversationId,
   );
   const candidate = refreshed ?? parsed;
-  // The evaluation path can race ahead of completion. If ChatGPT is still streaming, wait for the watchdog poller.
-  const elapsedMs = Date.now() - start;
-  const remainingMs = Math.max(0, timeoutMs - elapsedMs);
-  if (remainingMs > 0) {
-    const [stopVisible, completionVisible] = await Promise.all([
-      isStopButtonVisible(Runtime),
-      isCompletionVisible(Runtime),
-    ]);
-    if (stopVisible) {
+  // The observer can settle early, including at the deadline. Never save an active response.
+  if (await isStopButtonVisible(Runtime)) {
+    const remainingMs = Math.max(0, timeoutMs - (Date.now() - start));
+    if (remainingMs > 0) {
       logger("Assistant still generating; waiting for completion");
       const completed = await pollAssistantCompletion(
         Runtime,
@@ -272,12 +267,9 @@ async function waitForAssistantResponseOnce(
         minTurnIndex,
         expectedConversationId,
       );
-      if (completed) {
-        return completed;
-      }
-    } else if (completionVisible) {
-      // No-op: completion UI surfaced and stop button is gone.
+      if (completed) return completed;
     }
+    throw new Error("Timed out waiting for assistant response");
   }
 
   return candidate;
@@ -369,13 +361,11 @@ async function recoverAssistantResponse(
   if (recoveryTimeoutMs === 0) {
     return null;
   }
-  const recovered = await waitForCondition(
-    async () => {
-      const snapshot = await readAssistantSnapshot(Runtime, minTurnIndex, expectedConversationId);
-      return normalizeAssistantSnapshot(snapshot);
-    },
+  const recovered = await pollAssistantCompletion(
+    Runtime,
     recoveryTimeoutMs,
-    400,
+    minTurnIndex,
+    expectedConversationId,
   );
   if (recovered) {
     logger("Recovered assistant response via polling fallback");
@@ -657,22 +647,6 @@ function normalizeAssistantSnapshot(snapshot: AssistantSnapshot | null): {
   };
 }
 
-async function waitForCondition<T>(
-  getter: () => Promise<T | null>,
-  timeoutMs: number,
-  pollIntervalMs = 400,
-): Promise<T | null> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = await getter();
-    if (value) {
-      return value;
-    }
-    await delay(pollIntervalMs);
-  }
-  return null;
-}
-
 function buildAssistantSnapshotExpression(
   minTurnIndex?: number,
   expectedConversationId?: string,
@@ -706,7 +680,7 @@ function buildAssistantSnapshotExpression(
       return extracted;
     }
     // Fallback for ChatGPT project view: answers can live outside conversation turns.
-    const fallback = ${buildMarkdownFallbackExtractor("MIN_TURN_INDEX")};
+    const fallback = ${buildMarkdownFallbackExtractor("MIN_TURN_INDEX")}();
     return fallback ?? extracted;
   })()`;
 }
@@ -948,7 +922,9 @@ function buildAssistantExtractor(functionName: string): string {
     };
 
     const expandCollapsibles = (root) => {
-      const buttons = Array.from(root.querySelectorAll('button'));
+      const buttons = Array.from(root.querySelectorAll('button')).filter(
+        (button) => !button.closest?.('[data-streaming-response-status]'),
+      );
       for (const button of buttons) {
         const label = (button.textContent || '').toLowerCase();
         const testid = (button.getAttribute('data-testid') || '').toLowerCase();
@@ -966,6 +942,7 @@ function buildAssistantExtractor(functionName: string): string {
     ${buildAssistantPlaceholderPredicate("isTransientAssistantPlaceholder")}
     const readNodePayload = (node) => {
       if (!(node instanceof HTMLElement)) return null;
+      if (node.closest?.('[data-streaming-response-status]') || node.querySelector('[data-streaming-response-status]')) return null;
       const innerText = node.innerText ?? '';
       const textContent = node.textContent ?? '';
       const text = innerText.trim().length > 0 ? innerText : textContent;
@@ -1006,7 +983,7 @@ function buildAssistantExtractor(functionName: string): string {
       let contentRoots = [];
       for (const selector of selectors) {
         const matches = Array.from(messageRoot.querySelectorAll(selector)).filter(
-          (node) => node instanceof HTMLElement,
+          (node) => node instanceof HTMLElement && !node.closest?.('[data-streaming-response-status]'),
         );
         if (matches.length > 0) {
           contentRoots = matches;
@@ -1020,6 +997,7 @@ function buildAssistantExtractor(functionName: string): string {
         .map((node) => readNodePayload(node))
         .filter(Boolean);
       if (payloads.length === 0) {
+        if (turn.querySelector('[data-streaming-response-status]')) return null;
         continue;
       }
       const selectedPayloads = payloads.some((payload) => !payload.placeholder)
@@ -1092,8 +1070,8 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
     const markdownSelector = '.markdown,[data-message-content],[data-testid*="message"],.prose,[class*="markdown"]';
     const isExcluded = (node) =>
       Boolean(
-        node?.closest?.(
-          'nav, aside, [data-testid*="sidebar"], [data-testid*="chat-history"], [data-testid*="composer"], form',
+        node?.querySelector?.('[data-streaming-response-status]') || node?.closest?.(
+          '[data-streaming-response-status], nav, aside, [data-testid*="sidebar"], [data-testid*="chat-history"], [data-testid*="composer"], form',
         ),
       );
     const scoreRoot = (node) => {
@@ -1116,6 +1094,7 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
     const CONVERSATION_SELECTOR = '${CONVERSATION_TURN_SELECTOR}';
     const turnNodes = Array.from(document.querySelectorAll(CONVERSATION_SELECTOR));
     const hasTurns = turnNodes.length > 0;
+    const latestStatusTurn = turnNodes.findLastIndex((turn) => turn.querySelector('[data-streaming-response-status]'));
     const resolveTurnIndex = (node) => {
       const turn = node?.closest?.(CONVERSATION_SELECTOR);
       if (!turn) return null;
@@ -1123,10 +1102,9 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
       return idx >= 0 ? idx : null;
     };
     const isAfterMinTurn = (node) => {
-      if (__minTurn === null) return true;
-      if (!hasTurns) return true;
+      if (!hasTurns || (__minTurn === null && latestStatusTurn < 0)) return true;
       const idx = resolveTurnIndex(node);
-      return idx !== null && idx >= __minTurn;
+      return idx !== null && idx >= Math.max(__minTurn ?? -1, latestStatusTurn);
     };
     const normalize = (value) => String(value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
     const collectUserText = (scope) => {

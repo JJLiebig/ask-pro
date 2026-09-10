@@ -20,6 +20,110 @@ afterEach(() => {
 });
 
 describe("assistant response actions", () => {
+  test.each(["status only", "tool markdown", "final answer"])(
+    "excludes progress panels: %s",
+    (scenario) => {
+      class Element {
+        constructor(
+          readonly textContent: string,
+          readonly status = false,
+          readonly children: Element[] = [],
+        ) {}
+        get innerText() {
+          return this.textContent;
+        }
+        get innerHTML() {
+          return this.textContent;
+        }
+        getAttribute(name: string) {
+          return name === "data-turn" ? "assistant" : null;
+        }
+        closest(selector: string) {
+          if (selector.includes("conversation-turn")) return this === oldFinal ? oldTurn : turn;
+          return selector.includes("data-streaming-response-status") && this.status ? this : null;
+        }
+        querySelector(selector: string) {
+          return selector === "[data-streaming-response-status]"
+            ? (this.children.find((node) => node.status) ?? null)
+            : null;
+        }
+        querySelectorAll(selector: string): Element[] {
+          return selector.includes("markdown")
+            ? this.children.filter((node) => scenario !== "status only" || !node.status)
+            : [];
+        }
+      }
+      const progress = new Element("Inspecting Manifest and File Tree", true);
+      const final = new Element("Use the shared transaction boundary.");
+      const turn = new Element(
+        progress.textContent,
+        false,
+        scenario === "final answer" ? [progress, final] : [progress],
+      );
+      const oldFinal = new Element("An older completed answer.");
+      const oldTurn = new Element(oldFinal.textContent, false, [oldFinal]);
+      const main = new Element("", false, [oldFinal, progress]);
+      const document = {
+        querySelectorAll: () => [oldTurn, turn],
+        querySelector: (selector: string) => (selector === "main" ? main : null),
+      };
+      const snapshot = new Function(
+        "document",
+        "HTMLElement",
+        "location",
+        `return ${buildAssistantSnapshotExpressionForTest()}`,
+      )(document, Element, { href: "https://chatgpt.com/c/test" });
+      if (scenario === "final answer") expect(snapshot?.text).toBe(final.textContent);
+      else expect(snapshot).toBeNull();
+    },
+  );
+
+  test.each([1, 5000])("does not save active text at a %s ms deadline", async (timeoutMs) => {
+    vi.useFakeTimers();
+    const runtime = {
+      evaluate: vi.fn(async ({ expression }: { expression: string }) => {
+        if (
+          expression.includes("extractAssistantTurn") ||
+          expression.includes("captureViaObserver")
+        ) {
+          return {
+            result: {
+              type: "object",
+              value: { text: "A partial response that has not finished yet.", turnIndex: 1 },
+            },
+          };
+        }
+        return { result: { value: expression.startsWith("Boolean(document.querySelector(") } };
+      }),
+    } as unknown as ChromeClient["Runtime"];
+    const pending = expect(
+      waitForAssistantResponse(runtime, timeoutMs, vi.fn() as unknown as BrowserLogger, 1),
+    ).rejects.toThrow("Timed out waiting for assistant response");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+  });
+
+  test("recovery waits for completion instead of accepting partial text", async () => {
+    vi.useFakeTimers();
+    const runtime = {
+      evaluate: vi.fn(async ({ expression }: { expression: string }) => ({
+        result: {
+          value: expression.includes("extractAssistantTurn")
+            ? { text: "Partial response", turnIndex: 1 }
+            : expression.startsWith("Boolean(document.querySelector("),
+        },
+      })),
+    } as unknown as ChromeClient["Runtime"];
+    const pending = __test__.recoverAssistantResponse(
+      runtime,
+      1000,
+      vi.fn() as unknown as BrowserLogger,
+      1,
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(pending).resolves.toBeNull();
+  });
+
   test.each([
     { answer: "", active: false, laterUser: false, stopped: true },
     { answer: "A substantive partial answer.", active: false, laterUser: false, stopped: false },
