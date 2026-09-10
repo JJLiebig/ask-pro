@@ -45,6 +45,12 @@ async function evaluateThinkingStatus(labels: string[]) {
 }
 
 describe("thinking status", () => {
+  test("reports active tool work with only Stop answering visible", async () => {
+    const { snapshot, controls } = await evaluateThinkingStatus(["Stop answering"]);
+    expect(snapshot).toMatchObject({ message: "active", source: "inline" });
+    expect(controls[0].click).not.toHaveBeenCalled();
+  });
+
   test("reports the passive Pro gate only while both controls are visible", async () => {
     const active = await evaluateThinkingStatus(["Answer now", "Stop answering"]);
     const incomplete = await evaluateThinkingStatus(["Answer now"]);

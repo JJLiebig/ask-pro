@@ -153,6 +153,46 @@ const runModelSelectionExpression = async (
 };
 
 describe("browser model selection matchers", () => {
+  it.each([false, true])(
+    "selects the literal Latest option (already selected: %s)",
+    async (selected) => {
+      let clicks = 0;
+      const pill = new FakeElement("6 Pro", { class: "__composer-pill", "aria-haspopup": "menu" });
+      const latest = new FakeElement(
+        "Latest",
+        { role: "menuitemradio", "aria-checked": String(selected) },
+        [],
+        () => {
+          clicks += 1;
+          latest.setAttribute("aria-checked", "true");
+        },
+      );
+      const menu = new FakeElement("", {}, [
+        new FakeElement("GPT-5.6 Sol", { "aria-checked": String(!selected) }),
+        latest,
+      ]);
+      const result = await runModelSelectionExpression("Latest", new FakeDocument([pill], [menu]));
+      expect(result).toEqual({
+        status: selected ? "already-selected" : "switched",
+        label: "Latest",
+      });
+      expect(clicks).toBe(selected ? 0 : 1);
+    },
+  );
+
+  it("does not accept a dated model when Latest is missing", async () => {
+    const pill = new FakeElement("GPT-5.6 Sol", {
+      "data-testid": "model-switcher-dropdown-button",
+    });
+    const menu = new FakeElement("", {}, [
+      new FakeElement("GPT-5.6 Sol", { "aria-checked": "true" }),
+    ]);
+    const result = await runModelSelectionExpression("Latest", new FakeDocument([pill], [menu]), {
+      fastTimeout: true,
+    });
+    expect(result.status).toBe("option-not-found");
+  });
+
   it("keeps retained model labels version-specific", () => {
     expect(mapChatGptModelToBrowserLabel("gpt-5.5-pro")).toBe("GPT-5.5 Pro");
   });

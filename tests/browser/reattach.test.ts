@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { resumeBrowserSession } from "../../src/browser/reattach.js";
+import { AssistantStoppedError } from "../../src/browser/errors.js";
+import type { ChromeClient } from "../../src/browser/types.js";
 
 const tempDirs: string[] = [];
 
@@ -11,6 +13,36 @@ afterEach(async () => {
 });
 
 describe("reattach browser lease", () => {
+  test("returns an exhausted continuation to the caller instead of relaunching", async () => {
+    const recoverSession = vi.fn();
+    const client = {
+      Runtime: {
+        evaluate: async ({ expression }: { expression: string }) => ({
+          result: { value: expression === "location.href" ? "https://chatgpt.com/c/test" : 2 },
+        }),
+      },
+      Input: {},
+    } as unknown as ChromeClient;
+    await expect(
+      resumeBrowserSession(
+        { chromePort: 9222, conversationId: "test" },
+        {},
+        vi.fn<(message: string) => void>(),
+        {
+          listTargets: async () => [
+            { targetId: "test", type: "page", url: "https://chatgpt.com/c/test" },
+          ],
+          connect: async () => client,
+          waitForAssistantResponse: async () => {
+            throw new AssistantStoppedError(3);
+          },
+          recoverSession,
+        },
+      ),
+    ).rejects.toBeInstanceOf(AssistantStoppedError);
+    expect(recoverSession).not.toHaveBeenCalled();
+  });
+
   test("releases its lease before falling back after an attach failure", async () => {
     const profileDir = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-lease-"));
     tempDirs.push(profileDir);

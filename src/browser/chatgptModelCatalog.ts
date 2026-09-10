@@ -31,7 +31,7 @@ export interface ChatGptModelMatchers {
 }
 
 export const LATEST_CHATGPT_BROWSER_PRO_MODEL = "gpt-5.6-pro" as const;
-export const DEFAULT_CHATGPT_BROWSER_MODEL_LABEL = "GPT-5.6 Sol";
+export const DEFAULT_CHATGPT_BROWSER_MODEL_LABEL = "Latest";
 
 const CHATGPT_BROWSER_MODEL_TARGETS: ChatGptBrowserModelTarget[] = [
   {

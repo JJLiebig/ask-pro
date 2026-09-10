@@ -49,13 +49,14 @@ import { INPUT_SELECTORS } from "./constants.js";
 import { uploadAttachmentViaDataTransfer } from "./actions/remoteFileTransfer.js";
 import { ensureThinkingTime } from "./actions/thinkingTime.js";
 import { startThinkingStatusMonitor } from "./actions/thinkingStatus.js";
+import { createAssistantContinuation } from "./actions/assistantResponse.js";
 import { createPostSubmitInputGuard } from "./actions/inputGuard.js";
 import { isChromeWindowMinimized, setChromeWindowState } from "./actions/windowState.js";
 import { estimateTokenCount, withRetries, delay } from "./utils.js";
 import { formatElapsed } from "./format.js";
 import { CHATGPT_URL, CONVERSATION_TURN_SELECTOR, DEFAULT_MODEL_STRATEGY } from "./constants.js";
 import type { LaunchedChrome } from "chrome-launcher";
-import { BrowserAutomationError } from "./errors.js";
+import { AssistantStoppedError, BrowserAutomationError } from "./errors.js";
 import { defaultAskProBrowserProfileDir } from "./profilePaths.js";
 import { applyPageLanguageOverrides, seedChromeProfileLanguage } from "./language.js";
 import { alignPromptEchoPair, buildPromptEchoMatcher, withTimeout } from "./reattachHelpers.js";
@@ -791,6 +792,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     })
       ? createPostSubmitInputGuard(Input, logger)
       : null;
+    const continueResponse = createAssistantContinuation(
+      Runtime,
+      Input,
+      logger,
+      postSubmitInputGuard,
+    );
     disablePostSubmitInputGuard = () => postSubmitInputGuard?.disable() ?? Promise.resolve(true);
     let authenticatedWindowParked =
       chromeLaunchMinimized || windowParkedAfterSetup || windowWasMinimized;
@@ -1348,6 +1355,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
             baselineTurns ?? undefined,
             expectedConversationUrl,
             expectedConversationId,
+            continueResponse,
           ),
         ),
       );
@@ -1367,12 +1375,16 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
               baselineTurns ?? undefined,
               expectedConversationUrl,
               expectedConversationId,
+              continueResponse,
             ),
           ),
         );
       } catch (error) {
         if (isAssistantResponseTimeoutError(error)) {
-          const rechecked = await attemptAssistantRecheck().catch(() => null);
+          const rechecked = await attemptAssistantRecheck().catch((error) => {
+            if (error instanceof AssistantStoppedError) throw error;
+            return null;
+          });
           if (rechecked) {
             answer = rechecked;
           } else {
@@ -2395,6 +2407,12 @@ async function runRemoteBrowserMode(
     const postSubmitInputGuard = shouldEnablePostSubmitInputGuard(config)
       ? createPostSubmitInputGuard(Input, logger)
       : null;
+    const continueResponse = createAssistantContinuation(
+      Runtime,
+      Input,
+      logger,
+      postSubmitInputGuard,
+    );
 
     const domainEnablers = [Network.enable({}), Page.enable(), Runtime.enable()];
     if (DOM && typeof DOM.enable === "function") {
@@ -2667,6 +2685,7 @@ async function runRemoteBrowserMode(
           baselineTurns ?? undefined,
           expectedConversationUrl,
           expectedConversationId,
+          continueResponse,
         ),
       );
       logger("Recovered assistant response after delayed recheck");
@@ -2684,11 +2703,15 @@ async function runRemoteBrowserMode(
             baselineTurns ?? undefined,
             expectedConversationUrl,
             expectedConversationId,
+            continueResponse,
           ),
         );
       } catch (error) {
         if (isAssistantResponseTimeoutError(error)) {
-          const rechecked = await attemptAssistantRecheck().catch(() => null);
+          const rechecked = await attemptAssistantRecheck().catch((error) => {
+            if (error instanceof AssistantStoppedError) throw error;
+            return null;
+          });
           if (rechecked) {
             answer = rechecked;
           } else {
@@ -2976,6 +2999,7 @@ async function waitForAssistantResponseWithReload(
   minTurnIndex?: number,
   expectedConversationUrl?: string,
   expectedConversationId?: string,
+  continueResponse?: (turnIndex: number) => Promise<number>,
 ) {
   try {
     return await waitForAssistantResponse(
@@ -2984,6 +3008,7 @@ async function waitForAssistantResponseWithReload(
       logger,
       minTurnIndex,
       expectedConversationId,
+      continueResponse,
     );
   } catch (error) {
     if (!shouldReloadAfterAssistantError(error)) {
@@ -3002,6 +3027,7 @@ async function waitForAssistantResponseWithReload(
       logger,
       minTurnIndex,
       expectedConversationId,
+      continueResponse,
     );
   }
 }

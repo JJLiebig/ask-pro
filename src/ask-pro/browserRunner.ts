@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { BrowserAutomationError } from "../browser/errors.js";
+import { DEFAULT_CHATGPT_BROWSER_MODEL_LABEL } from "../browser/chatgptModelCatalog.js";
+import { AssistantStoppedError, BrowserAutomationError } from "../browser/errors.js";
 import {
   askProAgentIdForLegacyBrowserProfileDir,
   askProAgentIdForManagedBrowserProfileDir,
@@ -114,7 +115,7 @@ async function runAskProBrowserSessionWithLease({
         inputTimeoutMs: 90_000,
         assistantRecheckDelayMs: 30_000,
         assistantRecheckTimeoutMs: 180_000,
-        desiredModel: "GPT-5.6 Sol",
+        desiredModel: DEFAULT_CHATGPT_BROWSER_MODEL_LABEL,
         modelStrategy: "select",
         thinkingTime: "pro",
         acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
@@ -287,6 +288,21 @@ async function runAskProBrowserSessionWithLease({
       throw new AskProNeedsAuthError(sessionId, browserProfile, classifyBrowserError(error));
     }
 
+    if (error instanceof AssistantStoppedError) {
+      await writeTerminalBrowserMetadata(
+        cwd,
+        sessionId,
+        "incomplete_answer",
+        "stopped_without_answer",
+      );
+      await updateAskProStatus({
+        cwd,
+        sessionId,
+        status: "INCOMPLETE_ANSWER",
+        reason: "stopped_without_answer",
+      });
+      throw error;
+    }
     if (isAssistantTimeoutError(error)) {
       await writeTerminalBrowserMetadata(cwd, sessionId, "wait_timed_out", "assistant_timeout");
       await updateAskProStatus({
@@ -416,7 +432,7 @@ async function resumeAskProBrowserSessionWithLease({
         inputTimeoutMs: 90_000,
         acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
         url: chatgptUrl,
-        desiredModel: "GPT-5.6 Sol",
+        desiredModel: DEFAULT_CHATGPT_BROWSER_MODEL_LABEL,
         thinkingTime: "pro",
         startMinimized: false,
       },
@@ -519,6 +535,21 @@ async function resumeAskProBrowserSessionWithLease({
       });
       throw new AskProNeedsAuthError(sessionId, fallbackProfile, classifyBrowserError(error));
     }
+    if (error instanceof AssistantStoppedError) {
+      await writeTerminalBrowserMetadata(
+        cwd,
+        sessionId,
+        "incomplete_answer",
+        "stopped_without_answer",
+      );
+      await updateAskProStatus({
+        cwd,
+        sessionId,
+        status: "INCOMPLETE_ANSWER",
+        reason: "stopped_without_answer",
+      });
+      throw error;
+    }
     if (isAssistantTimeoutError(error)) {
       await writeTerminalBrowserMetadata(cwd, sessionId, "wait_timed_out", "assistant_timeout");
       await updateAskProStatus({
@@ -598,7 +629,9 @@ function isTemporaryProUnavailableError(error: unknown): boolean {
   const message =
     error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return (
-    message.includes('unable to find model option matching "gpt-5.6 sol"') ||
+    message.includes(
+      `unable to find model option matching "${DEFAULT_CHATGPT_BROWSER_MODEL_LABEL.toLowerCase()}"`,
+    ) ||
     message.includes("unable to locate the chatgpt model selector button") ||
     message.includes("unable to select pro intelligence")
   );
@@ -778,7 +811,7 @@ function authFailureChromeMode(chromeMode: AskProBrowserMetadata["chromeMode"]) 
 async function writeTerminalBrowserMetadata(
   cwd: string,
   sessionId: string,
-  status: "failed" | "wait_timed_out",
+  status: "failed" | "wait_timed_out" | "incomplete_answer",
   reason: string,
 ): Promise<void> {
   const paths = getAskProSessionPaths(cwd, sessionId);
@@ -786,7 +819,7 @@ async function writeTerminalBrowserMetadata(
   if (!current) return;
   const { chromeMode, ...rest } = current;
   const terminalChromeMode =
-    status === "wait_timed_out" && chromeMode === "reattaching"
+    status !== "failed" && chromeMode === "reattaching"
       ? "reused_devtools"
       : chromeMode === "launched" || chromeMode === "reused_devtools" || chromeMode === "relaunched"
         ? chromeMode
@@ -899,7 +932,7 @@ function buildAskProBrowserLogger(
     if (typeof message !== "string") return;
     void appendAskProLog(cwd, sessionId, message);
     const shouldPrint =
-      verbose || /\b(thinking|waiting|fallback|retry|url|reattach)\b/i.test(message);
+      verbose || /\b(thinking|waiting|fallback|retry|stopped|url|reattach)\b/i.test(message);
     if (shouldPrint) {
       console.error(message);
     }

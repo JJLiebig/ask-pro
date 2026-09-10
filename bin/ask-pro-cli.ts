@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import "dotenv/config";
+import { AssistantStoppedError } from "../src/browser/errors.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command, Option } from "commander";
@@ -250,6 +251,11 @@ async function submitOrResumeBrowserSession(
         verbose: options.verbose,
       });
     } catch (error) {
+      if (error instanceof AssistantStoppedError) {
+        const { status: stopped } = await readAskProStatus({ cwd, sessionId });
+        printStatusRecord(stopped, await readBrowserPreflight(cwd, stopped));
+        return;
+      }
       if (error instanceof AskProNeedsAuthError) {
         await printAuthInstructions(sessionId, options, cwd, error);
         return;
@@ -276,6 +282,11 @@ async function submitOrResumeBrowserSession(
       ...answerExtraForStatus(completed, sessionId),
     });
   } catch (error) {
+    if (error instanceof AssistantStoppedError) {
+      const { status: stopped } = await readAskProStatus({ cwd, sessionId });
+      printStatusRecord(stopped, await readBrowserPreflight(cwd, stopped));
+      return;
+    }
     if (error instanceof AskProNeedsAuthError) {
       await printAuthInstructions(sessionId, options, cwd, error);
       return;
@@ -378,6 +389,10 @@ function printStatusRecord(status: AskProStatusFile, extra: AskProToonFields = {
     action: actionForStatus(status),
     resume: shouldPrintResume(status) ? status.resumeCommand : undefined,
     harvest: shouldPrintHarvest(status) ? status.harvestCommand : undefined,
+    retry:
+      status.reason === "stopped_without_answer"
+        ? "Run the original request again without --resume to start a new chat."
+        : undefined,
     ...extra,
   });
 }
@@ -410,6 +425,7 @@ function normalizeTemporary(temporary: boolean | undefined): string {
 }
 
 function actionForStatus(status: AskProStatusFile): string {
+  if (status.reason === "stopped_without_answer") return "choose_resume_or_retry";
   switch (status.status) {
     case "DRY_RUN_COMPLETE":
     case "INCOMPLETE_ANSWER":

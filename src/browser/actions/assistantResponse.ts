@@ -10,8 +10,45 @@ import {
 import { delay } from "../utils.js";
 import { logDomFailure } from "../domDebug.js";
 import { buildClickDispatcher } from "./domEvents.js";
+import { AssistantStoppedError } from "../errors.js";
+import { readComposerSnapshot, submitPrompt } from "./promptComposer.js";
+import type { PostSubmitInputGuard } from "./inputGuard.js";
 
 const ASSISTANT_POLL_TIMEOUT_ERROR = "assistant-response-watchdog-timeout";
+
+export function createAssistantContinuation(
+  Runtime: ChromeClient["Runtime"],
+  Input: ChromeClient["Input"],
+  logger: BrowserLogger,
+  inputGuard?: PostSubmitInputGuard | null,
+  state = { used: false },
+): (turnIndex: number) => Promise<number> {
+  return async (turnIndex) => {
+    if (state.used) throw new AssistantStoppedError(turnIndex);
+    // A failed/ambiguous send must not trigger another automatic paid attempt.
+    state.used = true;
+    const composer = await readComposerSnapshot(Runtime);
+    if (composer.activeValue.trim() || (inputGuard && !(await inputGuard.disable()))) {
+      throw new AssistantStoppedError(turnIndex);
+    }
+    logger('ChatGPT stopped without an answer; sending "continue" once.');
+    try {
+      await submitPrompt(
+        {
+          runtime: Runtime,
+          input: Input,
+          baselineTurns: turnIndex + 1,
+          afterSubmit: inputGuard ? () => inputGuard.enable() : undefined,
+        },
+        "continue",
+        logger,
+      );
+    } catch {
+      throw new AssistantStoppedError(turnIndex);
+    }
+    return turnIndex + 1;
+  };
+}
 
 function isTransientAssistantPlaceholderText(normalized: string): boolean {
   const text = normalized.replace(/\s+/g, " ").trim();
@@ -19,6 +56,7 @@ function isTransientAssistantPlaceholderText(normalized: string): boolean {
   // Learned: "Pro thinking" shows a placeholder turn that contains "Answer now".
   // That is not the final answer and must be ignored in browser automation.
   if (text === "chatgpt said:" || text === "chatgpt said") return true;
+  if (/^(chatgpt said:\s*)?stopped thinking$/.test(text)) return true;
   if (
     text.includes("file upload request") &&
     (text.includes("pro thinking") || text.includes("chatgpt said"))
@@ -49,6 +87,35 @@ function isTransientAssistantPlaceholderText(normalized: string): boolean {
 }
 
 export async function waitForAssistantResponse(
+  Runtime: ChromeClient["Runtime"],
+  timeoutMs: number,
+  logger: BrowserLogger,
+  minTurnIndex?: number,
+  expectedConversationId?: string,
+  continueResponse?: (turnIndex: number) => Promise<number>,
+): Promise<Awaited<ReturnType<typeof waitForAssistantResponseOnce>>> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      return await waitForAssistantResponseOnce(
+        Runtime,
+        Math.max(1, deadline - Date.now()),
+        logger,
+        minTurnIndex,
+        expectedConversationId,
+      );
+    } catch (error) {
+      if (!(error instanceof AssistantStoppedError)) throw error;
+      await Runtime.evaluate({
+        expression: "window.__askProCancelResponseObserver?.()",
+      }).catch(() => undefined);
+      if (!continueResponse || Date.now() >= deadline) throw error;
+      minTurnIndex = await continueResponse(error.turnIndex);
+    }
+  }
+}
+
+async function waitForAssistantResponseOnce(
   Runtime: ChromeClient["Runtime"],
   timeoutMs: number,
   logger: BrowserLogger,
@@ -126,6 +193,7 @@ export async function waitForAssistantResponse(
       ) {
         evaluation = await evaluationPromise;
       } else if (source === "poll") {
+        pollerAbort.abort();
         throw error;
       } else if (source === "evaluation") {
         const recovered = await recoverAssistantResponse(
@@ -188,15 +256,10 @@ export async function waitForAssistantResponse(
     expectedConversationId,
   );
   const candidate = refreshed ?? parsed;
-  // The evaluation path can race ahead of completion. If ChatGPT is still streaming, wait for the watchdog poller.
-  const elapsedMs = Date.now() - start;
-  const remainingMs = Math.max(0, timeoutMs - elapsedMs);
-  if (remainingMs > 0) {
-    const [stopVisible, completionVisible] = await Promise.all([
-      isStopButtonVisible(Runtime),
-      isCompletionVisible(Runtime),
-    ]);
-    if (stopVisible) {
+  // The observer can settle early, including at the deadline. Never save an active response.
+  if (await isStopButtonVisible(Runtime)) {
+    const remainingMs = Math.max(0, timeoutMs - (Date.now() - start));
+    if (remainingMs > 0) {
       logger("Assistant still generating; waiting for completion");
       const completed = await pollAssistantCompletion(
         Runtime,
@@ -204,12 +267,9 @@ export async function waitForAssistantResponse(
         minTurnIndex,
         expectedConversationId,
       );
-      if (completed) {
-        return completed;
-      }
-    } else if (completionVisible) {
-      // No-op: completion UI surfaced and stop button is gone.
+      if (completed) return completed;
     }
+    throw new Error("Timed out waiting for assistant response");
   }
 
   return candidate;
@@ -301,13 +361,11 @@ async function recoverAssistantResponse(
   if (recoveryTimeoutMs === 0) {
     return null;
   }
-  const recovered = await waitForCondition(
-    async () => {
-      const snapshot = await readAssistantSnapshot(Runtime, minTurnIndex, expectedConversationId);
-      return normalizeAssistantSnapshot(snapshot);
-    },
+  const recovered = await pollAssistantCompletion(
+    Runtime,
     recoveryTimeoutMs,
-    400,
+    minTurnIndex,
+    expectedConversationId,
   );
   if (recovered) {
     logger("Recovered assistant response via polling fallback");
@@ -327,6 +385,9 @@ async function parseAssistantEvaluationResult(
   meta: { turnId?: string | null; messageId?: string | null };
 } | null> {
   const { result } = evaluation;
+  if (result.value?.stoppedWithoutAnswer) {
+    throw new AssistantStoppedError(result.value.turnIndex);
+  }
   if (
     result.type === "object" &&
     result.value &&
@@ -562,6 +623,9 @@ function normalizeAssistantSnapshot(snapshot: AssistantSnapshot | null): {
   html?: string;
   meta: { turnId?: string | null; messageId?: string | null };
 } | null {
+  if (snapshot?.stoppedWithoutAnswer && typeof snapshot.turnIndex === "number") {
+    throw new AssistantStoppedError(snapshot.turnIndex);
+  }
   const text = snapshot?.text ? cleanAssistantText(snapshot.text) : "";
   if (!text.trim()) {
     return null;
@@ -581,22 +645,6 @@ function normalizeAssistantSnapshot(snapshot: AssistantSnapshot | null): {
     html: snapshot?.html ?? undefined,
     meta: { turnId: snapshot?.turnId ?? undefined, messageId: snapshot?.messageId ?? undefined },
   };
-}
-
-async function waitForCondition<T>(
-  getter: () => Promise<T | null>,
-  timeoutMs: number,
-  pollIntervalMs = 400,
-): Promise<T | null> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const value = await getter();
-    if (value) {
-      return value;
-    }
-    await delay(pollIntervalMs);
-  }
-  return null;
 }
 
 function buildAssistantSnapshotExpression(
@@ -626,12 +674,13 @@ function buildAssistantSnapshotExpression(
     // Learned: the default turn DOM misses project view; keep a fallback extractor.
     ${buildAssistantExtractor("extractAssistantTurn")}
     const extracted = extractAssistantTurn();
+    if (extracted?.stoppedWithoutAnswer) return extracted;
     ${buildAssistantPlaceholderPredicate("isPlaceholder")}
     if (extracted && extracted.text && !isPlaceholder(extracted)) {
       return extracted;
     }
     // Fallback for ChatGPT project view: answers can live outside conversation turns.
-    const fallback = ${buildMarkdownFallbackExtractor("MIN_TURN_INDEX")};
+    const fallback = ${buildMarkdownFallbackExtractor("MIN_TURN_INDEX")}();
     return fallback ?? extracted;
   })()`;
 }
@@ -715,6 +764,7 @@ function buildResponseObserverExpression(
         const cleanup = () => {
           if (cleanedUp) return;
           cleanedUp = true;
+          delete window.__askProCancelResponseObserver;
           if (timeoutId) {
             clearTimeout(timeoutId);
             timeoutId = null;
@@ -728,6 +778,8 @@ function buildResponseObserverExpression(
             observer = null;
           }
         };
+
+        window.__askProCancelResponseObserver = () => { cleanup(); resolve(null); };
 
         const observerCallback = () => {
           if (cleanedUp) return;
@@ -783,6 +835,7 @@ function buildResponseObserverExpression(
     };
 
     const waitForSettle = async (snapshot) => {
+      if (snapshot?.stoppedWithoutAnswer) return snapshot;
       // Learned: short answers can be 1-2 tokens; enforce longer settle windows to avoid truncation.
       // Learned: long streaming responses (esp. thinking models) can pause mid-stream;
       // use progressively longer windows to avoid truncation (#71).
@@ -869,7 +922,9 @@ function buildAssistantExtractor(functionName: string): string {
     };
 
     const expandCollapsibles = (root) => {
-      const buttons = Array.from(root.querySelectorAll('button'));
+      const buttons = Array.from(root.querySelectorAll('button')).filter(
+        (button) => !button.closest?.('[data-streaming-response-status]'),
+      );
       for (const button of buttons) {
         const label = (button.textContent || '').toLowerCase();
         const testid = (button.getAttribute('data-testid') || '').toLowerCase();
@@ -887,6 +942,7 @@ function buildAssistantExtractor(functionName: string): string {
     ${buildAssistantPlaceholderPredicate("isTransientAssistantPlaceholder")}
     const readNodePayload = (node) => {
       if (!(node instanceof HTMLElement)) return null;
+      if (node.closest?.('[data-streaming-response-status]') || node.querySelector('[data-streaming-response-status]')) return null;
       const innerText = node.innerText ?? '';
       const textContent = node.textContent ?? '';
       const text = innerText.trim().length > 0 ? innerText : textContent;
@@ -908,6 +964,14 @@ function buildAssistantExtractor(functionName: string): string {
         continue;
       }
       const messageRoot = turn.querySelector(ASSISTANT_SELECTOR) ?? turn;
+      const turnText = (turn.innerText || turn.textContent || '').replace(/^\\s*ChatGPT said:\\s*/i, '').trim();
+      const stopped = Array.from(turn.querySelectorAll('button')).some(
+        button => (button.textContent || '').trim().toLowerCase() === 'stopped thinking',
+      );
+      if (index === turns.length - 1 && stopped && turnText.toLowerCase() === 'stopped thinking' &&
+          !document.querySelector('${STOP_BUTTON_SELECTOR}')) {
+        return { text: '', stoppedWithoutAnswer: true, turnIndex: index };
+      }
       expandCollapsibles(messageRoot);
       const selectors = [
         '.markdown',
@@ -919,7 +983,7 @@ function buildAssistantExtractor(functionName: string): string {
       let contentRoots = [];
       for (const selector of selectors) {
         const matches = Array.from(messageRoot.querySelectorAll(selector)).filter(
-          (node) => node instanceof HTMLElement,
+          (node) => node instanceof HTMLElement && !node.closest?.('[data-streaming-response-status]'),
         );
         if (matches.length > 0) {
           contentRoots = matches;
@@ -933,6 +997,7 @@ function buildAssistantExtractor(functionName: string): string {
         .map((node) => readNodePayload(node))
         .filter(Boolean);
       if (payloads.length === 0) {
+        if (turn.querySelector('[data-streaming-response-status]')) return null;
         continue;
       }
       const selectedPayloads = payloads.some((payload) => !payload.placeholder)
@@ -958,6 +1023,7 @@ function buildAssistantPlaceholderPredicate(functionName: string): string {
     const normalized = String(snapshot?.text ?? snapshot ?? '').toLowerCase().replace(/\\s+/g, ' ').trim();
     if (!normalized) return false;
     if (normalized === 'chatgpt said:' || normalized === 'chatgpt said') return true;
+    if (/^(chatgpt said:\\s*)?stopped thinking$/.test(normalized)) return true;
     if (
       normalized.includes('file upload request') &&
       (normalized.includes('pro thinking') || normalized.includes('chatgpt said'))
@@ -1004,8 +1070,8 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
     const markdownSelector = '.markdown,[data-message-content],[data-testid*="message"],.prose,[class*="markdown"]';
     const isExcluded = (node) =>
       Boolean(
-        node?.closest?.(
-          'nav, aside, [data-testid*="sidebar"], [data-testid*="chat-history"], [data-testid*="composer"], form',
+        node?.querySelector?.('[data-streaming-response-status]') || node?.closest?.(
+          '[data-streaming-response-status], nav, aside, [data-testid*="sidebar"], [data-testid*="chat-history"], [data-testid*="composer"], form',
         ),
       );
     const scoreRoot = (node) => {
@@ -1028,6 +1094,7 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
     const CONVERSATION_SELECTOR = '${CONVERSATION_TURN_SELECTOR}';
     const turnNodes = Array.from(document.querySelectorAll(CONVERSATION_SELECTOR));
     const hasTurns = turnNodes.length > 0;
+    const latestStatusTurn = turnNodes.findLastIndex((turn) => turn.querySelector('[data-streaming-response-status]'));
     const resolveTurnIndex = (node) => {
       const turn = node?.closest?.(CONVERSATION_SELECTOR);
       if (!turn) return null;
@@ -1035,10 +1102,9 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
       return idx >= 0 ? idx : null;
     };
     const isAfterMinTurn = (node) => {
-      if (__minTurn === null) return true;
-      if (!hasTurns) return true;
+      if (!hasTurns || (__minTurn === null && latestStatusTurn < 0)) return true;
       const idx = resolveTurnIndex(node);
-      return idx !== null && idx >= __minTurn;
+      return idx !== null && idx >= Math.max(__minTurn ?? -1, latestStatusTurn);
     };
     const normalize = (value) => String(value || '').toLowerCase().replace(/\\s+/g, ' ').trim();
     const collectUserText = (scope) => {
@@ -1330,6 +1396,7 @@ function buildCopyExpression(meta: { messageId?: string | null; turnId?: string 
 }
 
 interface AssistantSnapshot {
+  stoppedWithoutAnswer?: boolean;
   text?: string;
   html?: string;
   messageId?: string | null;
