@@ -4,10 +4,10 @@
   "description": "Minimal browser-backed ChatGPT Pro escalation workflow for agents via $ask-pro.",
   "author": {
     "name": "Jonathan",
-    "url": "https://github.com/Pimpmuckl"
+    "url": "https://github.com/JJLiebig"
   },
-  "homepage": "https://github.com/Pimpmuckl/ask-pro#readme",
-  "repository": "https://github.com/Pimpmuckl/ask-pro",
+  "homepage": "https://github.com/JJLiebig/ask-pro#readme",
+  "repository": "https://github.com/JJLiebig/ask-pro",
   "license": "MIT",
   "keywords": ["codex", "chatgpt-pro", "browser-automation"],
   "skills": "./skills/",
@@ -18,9 +18,9 @@
     "developerName": "Jonathan",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
-    "websiteURL": "https://github.com/Pimpmuckl/ask-pro",
-    "privacyPolicyURL": "https://github.com/Pimpmuckl/ask-pro",
-    "termsOfServiceURL": "https://github.com/Pimpmuckl/ask-pro",
+    "websiteURL": "https://github.com/JJLiebig/ask-pro",
+    "privacyPolicyURL": "https://github.com/JJLiebig/ask-pro",
+    "termsOfServiceURL": "https://github.com/JJLiebig/ask-pro",
     "defaultPrompt": ["Ask ChatGPT Pro for a focused engineering second opinion."],
     "brandColor": "#10A37F",
     "composerIcon": "./assets/ask-pro_logo.png",

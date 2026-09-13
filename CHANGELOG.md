@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Point installation instructions and package/plugin links at `JJLiebig/ask-pro`.
 - Select ChatGPT’s rolling `Latest` model with `Pro` intelligence.
 - Recognize active tool work as thinking, exclude tool-status panels from answers,
   and time out instead of saving a response while ChatGPT is still generating.

@@ -9,15 +9,15 @@
     "chatgpt-pro",
     "codex"
   ],
-  "homepage": "https://github.com/Pimpmuckl/ask-pro#readme",
+  "homepage": "https://github.com/JJLiebig/ask-pro#readme",
   "bugs": {
-    "url": "https://github.com/Pimpmuckl/ask-pro/issues"
+    "url": "https://github.com/JJLiebig/ask-pro/issues"
   },
   "license": "MIT",
   "author": "",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Pimpmuckl/ask-pro.git"
+    "url": "git+https://github.com/JJLiebig/ask-pro.git"
   },
   "bin": {
     "ask-pro": "dist/bin/ask-pro-cli.js"

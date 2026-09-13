@@ -8,7 +8,7 @@
       "name": "ask-pro",
       "source": {
         "source": "url",
-        "url": "https://github.com/Pimpmuckl/ask-pro.git",
+        "url": "https://github.com/JJLiebig/ask-pro.git",
         "ref": "main"
       },
       "policy": {
