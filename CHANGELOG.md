@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+
+- Add skills CLI installation for Codex and other supported agents using the
+  standalone `ask-pro` npm CLI.
+- Publish `ask-pro` to npm after each passing main-branch CI run.
+
 ### Fixed
 
 - Point installation instructions and package/plugin links at `JJLiebig/ask-pro`.

@@ -25,3 +25,34 @@ jobs:
       - run: pnpm run test
       - run: pnpm run build
         if: matrix.os == 'ubuntu-latest'
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - name: Set unique main-run version
+        run: |
+          version=$(node -p "const [major, minor, patch] = require('./package.json').version.split('.').map(Number); [major, minor, patch + Number(process.env.GITHUB_RUN_NUMBER)].join('.')")
+          npm version "$version" --no-git-tag-version --ignore-scripts
+      - name: Publish to npm
+        run: |
+          package=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "$package@$version" version --json >/dev/null 2>&1; then
+            echo "$package@$version is already published"
+            exit 0
+          fi
+          npm publish --ignore-scripts --access public

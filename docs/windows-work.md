@@ -18,6 +18,9 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 - Cached plugin launches install, build, and execute under
   `%CODEX_HOME%\plugin-runtimes\ask-pro\<version>-<hash>\`, never in the
   installed plugin cache.
+- Skills CLI installs only `skills/ask-pro/SKILL.md`. Install the standalone
+  CLI with `npm install --global ask-pro`; it does not use Codex's plugin cache
+  or the marketplace runtime-copy path.
 - Browser login is human-controlled. If ChatGPT asks for login, MFA, or a
   challenge, leave Chrome open and resume with `ask-pro --resume <session-id>`.
   Manual-login recovery discovers the authenticated ChatGPT tab again instead

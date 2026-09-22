@@ -1,6 +1,6 @@
 ---
 name: ask-pro
-description: Escalate hard engineering questions to ChatGPT Pro through browser automation with focused repo context. Use when Codex needs a stronger external review, architecture plan, migration strategy, production-debugging second opinion, or when the user explicitly asks to use $ask-pro.
+description: Escalate hard engineering questions to ChatGPT Pro through browser automation with focused repo context. Use when an agent needs a stronger external review, architecture plan, migration strategy, production-debugging second opinion, or when the user explicitly asks to use $ask-pro.
 ---
 
 # $ask-pro
@@ -41,8 +41,10 @@ When invoked:
    For multiline prompts, write a temporary prompt file and use
    `ask-pro --no-temporary --prompt-file <path> --files "<glob>"`; do not rely
    on shell multiline quoting.
-   If `ask-pro` is not on `PATH`, run the cached plugin runner instead of the
-   mutable development checkout. Locate it under the installed plugin cache,
+   If installed through the skills CLI and `ask-pro` is not on `PATH`, install
+   the standalone CLI from the [README](https://github.com/JJLiebig/ask-pro#skills-cli-codex-and-other-supported-agents)
+   first. For Codex plugin installs without `ask-pro` on `PATH`, use the cached
+   plugin runner. Locate it under the installed plugin cache,
    usually
    `~/.codex/plugins/cache/<marketplace-name>/ask-pro/<version>/scripts/run-cached-cli.mjs`,
    then call it with:
@@ -87,7 +89,7 @@ again. Example:
 
 Assume Pro has no caller or repository context. Include each material fact and
 instruction once: the goal, current state, hard constraints, evidence, success
-criteria, and required output. Do not rely on Codex thread context, repo
+criteria, and required output. Do not rely on the agent's conversation context, repo
 folklore, prior ask-pro runs, branch names, or unstated user preferences.
 Keep advisory design consults as plain answer requests. Start advisory prompts
 with:
@@ -156,9 +158,10 @@ ask-pro --resume <session-id>
 ask-pro --harvest <session-id>
 ```
 
-If the binary is not on `PATH`, use the cached plugin runner. Do not run from a
-mutable development checkout; it may contain in-flight changes that have not
-been synced for agents.
+If the binary is not on `PATH`, skills CLI installs need the standalone CLI from
+the README. Codex plugin installs can use the cached plugin runner. Do not run
+the plugin from a mutable development checkout; it may contain in-flight changes
+that have not been synced for agents.
 
 ```bash
 node <cached-runner> -- --cwd /path/to/repo --no-temporary --prompt-file question.md --files src
