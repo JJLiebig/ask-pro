@@ -75,4 +75,13 @@ Future Windows gotchas belong here.
   Refreshing the plugin leaves existing immutable session runtimes running.
 - September 23: ChatGPT can clear the composer and start generating before its
   current conversation turn selector reports a new turn. A visible Stop control
-  confirms submission in that case; a hidden matching element does not.
+  confirms submission in that case; a hidden matching element does not. The
+  current Stop button has `aria-label="Stop"` instead of the old test ID.
+- September 23: the signed-in model button now has
+  `aria-label="Select ChatGPT model"` without the old test ID or composer-pill
+  class. Its menu has a `[data-reasoning-slider="true"]` Power control; ArrowRight
+  moves it toward Pro, while End does not. The former "No cookies were applied"
+  hint after a missing selector did not prove sign-out; check `/backend-api/me`
+  status without reading its response body.
+- September 23: current replies use `MarkdownRoot-` containers with nested
+  `inline-markdown` citations. Capture the root to keep the full answer.

@@ -6,6 +6,15 @@ import {
   ensureThinkingTime,
 } from "../../src/browser/actions/thinkingTime.js";
 
+class FakeKeyboardEvent extends Event {
+  readonly key: string;
+
+  constructor(type: string, options: { key: string; bubbles?: boolean }) {
+    super(type, options);
+    this.key = options.key;
+  }
+}
+
 class FakeElement extends EventTarget {
   parentElement: FakeElement | null = null;
 
@@ -53,6 +62,12 @@ class FakeElement extends EventTarget {
 
   closest(selector: string): FakeElement | null {
     const className = this.getAttribute("class") ?? "";
+    if (
+      selector.includes("data-reasoning-slider") &&
+      this.getAttribute("data-reasoning-slider") === "true"
+    ) {
+      return this;
+    }
     if (
       selector.includes("model-picker-thinking-effort-row") &&
       className.includes("model-picker-thinking-effort-row")
@@ -200,7 +215,7 @@ const runThinkingTimeExpression = async (
     document,
     EventTarget,
     HTMLElement: FakeElement,
-    KeyboardEvent: Event,
+    KeyboardEvent: FakeKeyboardEvent,
     MouseEvent: Event,
     performance: options.fastTimeout
       ? {
@@ -550,35 +565,36 @@ describe("browser thinking-time selection expression", () => {
     expect(proClicked).toBe(true);
   });
 
-  it("selects Pro from the current reasoning-effort slider", async () => {
-    let endPressed = false;
+  it("selects Pro from the current model-picker power slider", async () => {
+    let rightPressed = false;
     const modelButton = new FakeElement("High", {
       "aria-haspopup": "menu",
       class: "__composer-pill __composer-pill--neutral",
     });
-    const slider = new FakeElement(
+    const slider = new FakeElement("", {
+      "aria-valuemax": "4",
+      "aria-valuemin": "0",
+      "aria-valuenow": "3",
+      role: "slider",
+    });
+    const power = new FakeElement(
       "",
-      { "aria-valuemax": "4", "aria-valuemin": "0", "aria-valuenow": "3", role: "slider" },
-      [],
+      { "data-reasoning-slider": "true", role: "menuitem" },
+      [new FakeElement("", { "data-model-picker-power-slider": "" }, [slider])],
       undefined,
       (event) => {
-        if (event.type !== "keydown") return;
-        endPressed = true;
+        if (event.type !== "keydown" || (event as KeyboardEvent).key !== "ArrowRight") return;
+        rightPressed = true;
         slider.setAttribute("aria-valuenow", "4");
-        modelButton.textContent = "Pro";
       },
     );
-    const menu = new FakeElement(
-      "Advanced Faster Smarter Model GPT-5.6 Sol Effort High",
-      { "data-testid": "composer-intelligence-picker-content", role: "group" },
-      [new FakeElement("", { "data-model-reasoning-effort-slider": "" }, [slider])],
-    );
+    const menu = new FakeElement("6 Pro Power Latest", { role: "menu" }, [power]);
     const document = new FakeDocument(modelButton, [], {}, [], [menu]);
 
     const result = await runThinkingTimeExpression(document, "pro");
 
     expect(result).toEqual({ status: "switched", label: "Pro" });
-    expect(endPressed).toBe(true);
+    expect(rightPressed).toBe(true);
   });
 
   it("keeps fallback paths when the current Intelligence menu is unmatched", async () => {

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   __test__,
   buildAssistantSnapshotExpressionForTest,
+  buildMarkdownFallbackExtractorForTest,
   createAssistantContinuation,
   waitForAssistantResponse,
 } from "../../src/browser/actions/assistantResponse.js";
@@ -20,6 +21,58 @@ afterEach(() => {
 });
 
 describe("assistant response actions", () => {
+  test("captures the full current ChatGPT answer instead of its last inline citation", () => {
+    const answer = {
+      innerText: "Complete answer with several paragraphs.",
+      textContent: "Complete answer with several paragraphs.",
+      innerHTML: "<p>Complete answer with several paragraphs.</p>",
+      closest: () => null,
+      matches: (selector: string) => selector.includes("MarkdownRoot-"),
+    };
+    const citation = {
+      innerText: "file.rs:1–2",
+      textContent: "file.rs:1–2",
+      innerHTML: "file.rs:1–2",
+      closest: (selector: string) => (selector.includes("MarkdownRoot-") ? answer : null),
+      matches: () => false,
+    };
+    const main = {
+      querySelectorAll: (selector: string) =>
+        selector.includes("MarkdownRoot-") ? [answer, citation] : [],
+      querySelector: (selector: string) =>
+        selector.includes('data-message-author-role="assistant"') ? answer : null,
+    };
+    const document = {
+      querySelector: (selector: string) => (selector === "main" ? main : null),
+      querySelectorAll: () => [],
+    };
+    const snapshot = new Function(
+      "document",
+      `return ${buildMarkdownFallbackExtractorForTest()}()`,
+    )(document);
+
+    expect(snapshot?.text).toBe(answer.innerText);
+  });
+
+  test("ignores mounted hidden Stop controls while checking every match", () => {
+    let visible = true;
+    const hiddenStop = { getBoundingClientRect: () => ({ width: 0, height: 0 }) };
+    const shownStop = {
+      getBoundingClientRect: () => ({ width: visible ? 20 : 0, height: visible ? 20 : 0 }),
+    };
+    const check = new Function(
+      "document",
+      "getComputedStyle",
+      `return ${__test__.visibleStopButtonExpression(JSON.stringify("button[aria-label=Stop]"))}`,
+    );
+    const document = { querySelectorAll: () => [hiddenStop, shownStop] };
+    const getComputedStyle = () => ({ display: "block", visibility: "visible", opacity: "1" });
+
+    expect(check(document, getComputedStyle)).toBe(true);
+    visible = false;
+    expect(check(document, getComputedStyle)).toBe(false);
+  });
+
   test.each(["status only", "tool markdown", "final answer"])(
     "excludes progress panels: %s",
     (scenario) => {
@@ -93,7 +146,7 @@ describe("assistant response actions", () => {
             },
           };
         }
-        return { result: { value: expression.startsWith("Boolean(document.querySelector(") } };
+        return { result: { value: expression.includes("getComputedStyle(node)") } };
       }),
     } as unknown as ChromeClient["Runtime"];
     const pending = expect(
@@ -110,7 +163,7 @@ describe("assistant response actions", () => {
         result: {
           value: expression.includes("extractAssistantTurn")
             ? { text: "Partial response", turnIndex: 1 }
-            : expression.startsWith("Boolean(document.querySelector("),
+            : expression.includes("getComputedStyle(node)"),
         },
       })),
     } as unknown as ChromeClient["Runtime"];
@@ -162,15 +215,21 @@ describe("assistant response actions", () => {
       "document",
       "HTMLElement",
       "location",
+      "getComputedStyle",
       `return ${buildAssistantSnapshotExpressionForTest()}`,
     )(
       {
-        querySelectorAll: () => turns,
-        querySelector: (selector: string) =>
-          selector.includes("stop") && sample.active ? {} : null,
+        querySelectorAll: (selector: string) =>
+          selector.includes("stop-button")
+            ? sample.active
+              ? [{ getBoundingClientRect: () => ({ width: 20, height: 20 }) }]
+              : []
+            : turns,
+        querySelector: () => null,
       },
       Element,
       { href: "https://chatgpt.com/c/test" },
+      () => ({ display: "block", visibility: "visible", opacity: "1" }),
     );
     expect(snapshot?.stoppedWithoutAnswer === true).toBe(sample.stopped);
     if (sample.answer) expect(snapshot.text).toBe(sample.answer);
