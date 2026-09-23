@@ -73,3 +73,6 @@ Future Windows gotchas belong here.
   literal `Latest` option and keep the reasoning slider on `Pro`. Tool work appears
   inside `[data-streaming-response-status]`; it is progress, not answer content.
   Refreshing the plugin leaves existing immutable session runtimes running.
+- September 23: ChatGPT can clear the composer and start generating before its
+  current conversation turn selector reports a new turn. A visible Stop control
+  confirms submission in that case; a hidden matching element does not.

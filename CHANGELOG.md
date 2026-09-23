@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Recognize a cleared composer and active ChatGPT Stop control as a submitted
+  prompt when conversation turn selectors miss the new turn.
 - Point installation instructions and package/plugin links at `JJLiebig/ask-pro`.
 - Select ChatGPT’s rolling `Latest` model with `Pro` intelligence.
 - Recognize active tool work as thinking, exclude tool-status panels from answers,

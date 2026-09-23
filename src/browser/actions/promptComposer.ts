@@ -804,7 +804,8 @@ async function verifyPromptCommitted(
 	    const isVisible = (node) => {
 	      if (!node || typeof node.getBoundingClientRect !== 'function') return false;
 	      const rect = node.getBoundingClientRect();
-	      return rect.width > 0 && rect.height > 0;
+	      const style = window.getComputedStyle(node);
+	      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
 	    };
 	    const inputs = inputSelectors
 	      .map((selector) => document.querySelector(selector))
@@ -823,7 +824,7 @@ async function verifyPromptCommitted(
 		        (normalizedPromptPrefix.length > 30 && lastTurn.includes(normalizedPromptPrefix)));
 		    const baseline = ${baselineLiteral};
 		    const hasNewTurn = baseline < 0 ? false : normalizedTurns.length > baseline;
-		    const stopVisible = Boolean(document.querySelector(${stopSelectorLiteral}));
+		    const stopVisible = isVisible(document.querySelector(${stopSelectorLiteral}));
 		    const assistantVisible = Boolean(
 		      document.querySelector(${assistantSelectorLiteral}) ||
 		      document.querySelector('[data-testid*="assistant"]'),
@@ -908,8 +909,7 @@ async function verifyPromptCommitted(
     }
     const fallbackCommit =
       info?.composerCleared &&
-      Boolean(info?.hasNewTurn) &&
-      ((info?.stopVisible ?? false) || info?.assistantVisible || info?.inConversation);
+      (info?.stopVisible || (info?.hasNewTurn && (info?.assistantVisible || info?.inConversation)));
     if (fallbackCommit) {
       return typeof turnsCount === "number" && Number.isFinite(turnsCount) ? turnsCount : null;
     }

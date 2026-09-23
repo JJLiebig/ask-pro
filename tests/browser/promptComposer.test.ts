@@ -1,7 +1,50 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, test, vi } from "vitest";
 import { __test__ } from "../../src/browser/actions/promptComposer.js";
 
 describe("prompt composer actions", () => {
+  test("accepts an active answer when turn selectors miss the submitted prompt", async () => {
+    const evaluate = vi.fn(async (_: { expression: string }) => ({
+      result: {
+        value: {
+          baseline: 0,
+          turnsCount: 0,
+          hasNewTurn: false,
+          composerCleared: true,
+          stopVisible: true,
+        },
+      },
+    }));
+
+    await expect(
+      __test__.verifyPromptCommitted({ evaluate } as never, "question", 100, undefined, 0),
+    ).resolves.toBe(0);
+    expect(evaluate).toHaveBeenCalledTimes(1);
+    expect(evaluate.mock.calls[0]?.[0]?.expression).toContain("isVisible(document.querySelector");
+  });
+
+  test("does not accept a cleared composer without visible submission evidence", async () => {
+    const evaluate = vi.fn(async ({ expression }: { expression: string }) => ({
+      result: {
+        value: runInNewContext(expression, {
+          document: {
+            querySelector: (selector: string) =>
+              selector.includes("stop-button")
+                ? { getBoundingClientRect: () => ({ width: 20, height: 20 }) }
+                : null,
+            querySelectorAll: () => [],
+          },
+          window: { getComputedStyle: () => ({ visibility: "hidden", display: "block" }) },
+          location: { href: "https://chatgpt.com/c/test" },
+        }),
+      },
+    }));
+
+    await expect(
+      __test__.verifyPromptCommitted({ evaluate } as never, "question", 1, undefined, 0),
+    ).rejects.toThrow("Prompt did not appear in conversation");
+  });
+
   test("arms post-submit guard before defocus and pointer cleanup", async () => {
     const order: string[] = [];
     const evaluate = vi.fn(async () => {
