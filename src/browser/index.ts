@@ -1086,14 +1086,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
             },
           },
         ),
-      ).catch((error) => {
-        const base = error instanceof Error ? error.message : String(error);
-        const hint =
-          appliedCookies === 0
-            ? " No cookies were applied; sign in to ChatGPT in the opened browser, then resume."
-            : "";
-        throw new Error(`${base}${hint}`);
-      });
+      );
       await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));
       logger(
         `Prompt textarea ready (after model switch, ${promptText.length.toLocaleString()} chars queued)`,

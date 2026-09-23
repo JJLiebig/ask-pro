@@ -72,7 +72,7 @@ export const UPLOAD_STATUS_SELECTORS = [
   '[aria-live="assertive"]',
 ];
 
-export const STOP_BUTTON_SELECTOR = '[data-testid="stop-button"]';
+export const STOP_BUTTON_SELECTOR = '[data-testid="stop-button"], button[aria-label="Stop"]';
 export const SEND_BUTTON_SELECTORS = [
   'button[data-testid="send-button"]',
   'button[data-testid*="composer-send"]',
@@ -82,7 +82,7 @@ export const SEND_BUTTON_SELECTORS = [
 ];
 export const SEND_BUTTON_SELECTOR = SEND_BUTTON_SELECTORS[0];
 export const MODEL_BUTTON_SELECTOR =
-  '[data-testid="model-switcher-dropdown-button"], button.__composer-pill[aria-haspopup="menu"], button.__composer-pill';
+  'button[aria-label="Select ChatGPT model"], [data-testid="model-switcher-dropdown-button"], button.__composer-pill[aria-haspopup="menu"], button.__composer-pill';
 export const COPY_BUTTON_SELECTORS = [
   'button[data-testid="copy-turn-action-button"]',
   'button[aria-label="Copy response"]',

@@ -10,8 +10,10 @@
 
 ### Fixed
 
-- Recognize a cleared composer and active ChatGPT Stop control as a submitted
-  prompt when conversation turn selectors miss the new turn.
+- Find ChatGPT's renamed model button and current Pro power slider before
+  submitting an escalation, without suggesting sign-in after a selector failure.
+- Recognize a cleared composer and active ChatGPT Stop control, including its
+  current accessible label, as a submitted prompt when turn selectors miss it.
 - Point installation instructions and package/plugin links at `JJLiebig/ask-pro`.
 - Select ChatGPT’s rolling `Latest` model with `Pro` intelligence.
 - Recognize active tool work as thinking, exclude tool-status panels from answers,

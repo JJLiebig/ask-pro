@@ -318,6 +318,7 @@ function buildThinkingTimeExpression(level: ThinkingTimeLevel): string {
         const text = normalize(menu.textContent ?? '');
         const testId = normalize(menu.getAttribute?.('data-testid') ?? '');
         return (
+          Boolean(menu.querySelector('[data-reasoning-slider="true"] [role="slider"][aria-valuemax]')) ||
           testId.includes('composer intelligence picker content') ||
           (
             text.includes('intelligence') &&
@@ -334,22 +335,21 @@ function buildThinkingTimeExpression(level: ThinkingTimeLevel): string {
       if (!menu) return null;
       const target = findOptionInMenu(menu, { currentIntelligence: true });
       if (!target) {
-        const slider = menu.querySelector(
-          '[data-model-reasoning-effort-slider] [role="slider"][aria-valuemax]'
-        );
+        const slider = menu.querySelector('[role="slider"][aria-valuemax]');
         if (TARGET_LEVEL !== 'pro' || !slider) return null;
         const max = Number(slider.getAttribute('aria-valuemax'));
         const before = Number(slider.getAttribute('aria-valuenow'));
         if (!Number.isFinite(max) || !Number.isFinite(before)) return null;
         if (before < max) {
-          slider.focus?.();
-          slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', code: 'End', bubbles: true }));
-          slider.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', code: 'End', bubbles: true }));
-          await sleep(STEP_WAIT_MS);
-          const updated = findCurrentIntelligenceMenu()?.querySelector(
-            '[data-model-reasoning-effort-slider] [role="slider"][aria-valuemax]'
-          ) ?? slider;
-          if (Number(updated.getAttribute('aria-valuenow')) < max) return null;
+          const control = slider.closest?.('[data-reasoning-slider="true"]') ?? slider;
+          control.focus?.();
+          for (let step = 0; step < 5; step++) {
+            if (Number(menu.querySelector('[role="slider"][aria-valuemax]')?.getAttribute('aria-valuenow')) >= max) break;
+            control.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true }));
+            control.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', code: 'ArrowRight', bubbles: true }));
+            await sleep(STEP_WAIT_MS);
+          }
+          if (Number(menu.querySelector('[role="slider"][aria-valuemax]')?.getAttribute('aria-valuenow')) < max) return null;
         }
         return { status: before >= max ? 'already-selected' : 'switched', label: 'Pro' };
       }
