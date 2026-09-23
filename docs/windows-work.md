@@ -83,3 +83,5 @@ Future Windows gotchas belong here.
   moves it toward Pro, while End does not. The former "No cookies were applied"
   hint after a missing selector did not prove sign-out; check `/backend-api/me`
   status without reading its response body.
+- September 23: current replies use `MarkdownRoot-` containers with nested
+  `inline-markdown` citations. Capture the root to keep the full answer.

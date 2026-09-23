@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Capture the full answer in ChatGPT's current Markdown layout instead of an
+  inline citation from the last paragraph.
 - Find ChatGPT's renamed model button and current Pro power slider before
   submitting an escalation, without suggesting sign-in after a selector failure.
 - Recognize a cleared composer and active ChatGPT Stop control, including its

@@ -564,13 +564,21 @@ async function pollAssistantCompletion(
 async function isStopButtonVisible(Runtime: ChromeClient["Runtime"]): Promise<boolean> {
   try {
     const { result } = await Runtime.evaluate({
-      expression: `Boolean(document.querySelector('${STOP_BUTTON_SELECTOR}'))`,
+      expression: visibleStopButtonExpression(JSON.stringify(STOP_BUTTON_SELECTOR)),
       returnByValue: true,
     });
     return Boolean(result?.value);
   } catch {
     return false;
   }
+}
+
+function visibleStopButtonExpression(selector: string): string {
+  return `Array.from(document.querySelectorAll(${selector})).some((node) => {
+    const style = getComputedStyle(node);
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' && style.opacity !== '0';
+  })`;
 }
 
 async function isCompletionVisible(Runtime: ChromeClient["Runtime"]): Promise<boolean> {
@@ -872,7 +880,7 @@ function buildResponseObserverExpression(
         } else {
           stableCycles += 1;
         }
-        const stopVisible = Boolean(document.querySelector(STOP_SELECTOR));
+        const stopVisible = ${visibleStopButtonExpression("STOP_SELECTOR")};
         const finishedVisible = isLastAssistantTurnFinished();
 
         if (finishedVisible || (!stopVisible && stableCycles >= stableTarget)) {
@@ -969,7 +977,7 @@ function buildAssistantExtractor(functionName: string): string {
         button => (button.textContent || '').trim().toLowerCase() === 'stopped thinking',
       );
       if (index === turns.length - 1 && stopped && turnText.toLowerCase() === 'stopped thinking' &&
-          !document.querySelector('${STOP_BUTTON_SELECTOR}')) {
+          !(${visibleStopButtonExpression(JSON.stringify(STOP_BUTTON_SELECTOR))})) {
         return { text: '', stoppedWithoutAnswer: true, turnIndex: index };
       }
       expandCollapsibles(messageRoot);
@@ -1067,7 +1075,7 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
       document.querySelector('[role="main"]'),
     ].filter(Boolean);
     if (roots.length === 0) return null;
-    const markdownSelector = '.markdown,[data-message-content],[data-testid*="message"],.prose,[class*="markdown"]';
+    const markdownSelector = 'div[class*="MarkdownRoot-"],.markdown,[data-message-content],[data-testid*="message"],.prose,[class*="markdown"]';
     const isExcluded = (node) =>
       Boolean(
         node?.querySelector?.('[data-streaming-response-status]') || node?.closest?.(
@@ -1122,6 +1130,7 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
     };
     const markdowns = Array.from(root.querySelectorAll(markdownSelector))
       .filter((node) => !isExcluded(node))
+      .filter((node) => !node.closest('div[class*="MarkdownRoot-"]') || node.matches('div[class*="MarkdownRoot-"]'))
       .filter((node) => {
         const container = node.closest('[data-message-author-role], [data-turn]');
         if (!container) return true;
@@ -1141,6 +1150,7 @@ function buildMarkdownFallbackExtractor(minTurnLiteral?: string): string {
       if (!container || container === root || container === document.body) continue;
       const scoped = Array.from(container.querySelectorAll(markdownSelector))
         .filter((node) => !isExcluded(node))
+        .filter((node) => !node.closest('div[class*="MarkdownRoot-"]') || node.matches('div[class*="MarkdownRoot-"]'))
         .filter((node) => {
           const roleNode = node.closest('[data-message-author-role], [data-turn]');
           if (!roleNode) return true;
@@ -1455,4 +1465,5 @@ function cleanAssistantText(text: string): string {
 export const __test__ = {
   buildResponseObserverExpression,
   recoverAssistantResponse,
+  visibleStopButtonExpression,
 };
