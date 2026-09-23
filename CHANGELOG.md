@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- Find ChatGPT's current model picker and Pro effort slider in logged-in sessions without a misleading sign-in hint.
 - Point installation instructions and package/plugin links at `JJLiebig/ask-pro`.
 - Select ChatGPT’s rolling `Latest` model with `Pro` intelligence.
 - Recognize active tool work as thinking, exclude tool-status panels from answers,

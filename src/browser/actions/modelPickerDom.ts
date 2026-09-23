@@ -36,6 +36,7 @@ export function buildModelPickerDomHelpers(): string {
         if (!rect || rect.width <= 0 || rect.height <= 0) continue;
         let score = 0;
         if (testId.includes('model-switcher')) score += 1000;
+        if (candidate.getAttribute?.('aria-label') === 'Select ChatGPT model') score += 1000;
         if (label.includes('model')) score += 300;
         if (label.includes('gpt') || label.includes('chatgpt')) score += 200;
         if (label.includes('auto')) score += 250;

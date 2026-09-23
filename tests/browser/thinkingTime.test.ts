@@ -581,6 +581,34 @@ describe("browser thinking-time selection expression", () => {
     expect(endPressed).toBe(true);
   });
 
+  it("selects Pro from the current model menu slider", async () => {
+    let endPressed = false;
+    const modelButton = new FakeElement("Thinking effortHigh", {
+      "aria-haspopup": "menu",
+      "aria-label": "Select ChatGPT model",
+    });
+    const slider = new FakeElement(
+      "",
+      { "aria-valuemax": "4", "aria-valuemin": "0", "aria-valuenow": "3", role: "slider" },
+      [],
+      undefined,
+      (event) => {
+        if (event.type !== "keydown") return;
+        endPressed = true;
+        slider.setAttribute("aria-valuenow", "4");
+      },
+    );
+    const menu = new FakeElement("6 Pro Pro, 4 of 5 Latest GPT-5.6 Sol", { role: "menu" }, [
+      slider,
+    ]);
+    const document = new FakeDocument(modelButton, [], {}, [], [menu]);
+
+    const result = await runThinkingTimeExpression(document, "pro");
+
+    expect(result).toEqual({ status: "switched", label: "Pro" });
+    expect(endPressed).toBe(true);
+  });
+
   it("keeps fallback paths when the current Intelligence menu is unmatched", async () => {
     let extendedClicked = false;
     const modelButton = new FakeElement("Pro", {

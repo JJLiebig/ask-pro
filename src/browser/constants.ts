@@ -82,7 +82,7 @@ export const SEND_BUTTON_SELECTORS = [
 ];
 export const SEND_BUTTON_SELECTOR = SEND_BUTTON_SELECTORS[0];
 export const MODEL_BUTTON_SELECTOR =
-  '[data-testid="model-switcher-dropdown-button"], button.__composer-pill[aria-haspopup="menu"], button.__composer-pill';
+  '[data-testid="model-switcher-dropdown-button"], button[aria-label="Select ChatGPT model"], button.__composer-pill[aria-haspopup="menu"], button.__composer-pill';
 export const COPY_BUTTON_SELECTORS = [
   'button[data-testid="copy-turn-action-button"]',
   'button[aria-label="Copy response"]',

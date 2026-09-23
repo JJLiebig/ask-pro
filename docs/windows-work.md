@@ -47,6 +47,12 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 - The ChatGPT picker exposes `Latest` under Advanced > Model and a
   five-step reasoning-effort slider with `Pro` at the maximum. ask-pro selects
   or confirms both before submission.
+- The current logged-in ChatGPT homepage exposes its picker as a visible
+  `button[aria-label="Select ChatGPT model"]` without the old model-switcher test ID
+  or composer-pill class. A missing picker after a passed login check is a UI
+  selector failure, not evidence that the user needs to sign in.
+- The same picker menu exposes a bare `[role="slider"][aria-valuemax]` for Pro
+  effort, without the older `data-model-reasoning-effort-slider` wrapper.
 - Ordinary managed Chrome runs start minimized, then hide the native Windows
   browser window after isolated-tab setup. This keeps it out of normal desktop
   interaction and avoids repeating minimize/restore composition transitions

@@ -319,6 +319,7 @@ function buildThinkingTimeExpression(level: ThinkingTimeLevel): string {
         const testId = normalize(menu.getAttribute?.('data-testid') ?? '');
         return (
           testId.includes('composer intelligence picker content') ||
+          (TARGET_LEVEL === 'pro' && text.includes('pro') && !!menu.querySelector('[role="slider"][aria-valuemax]')) ||
           (
             text.includes('intelligence') &&
             text.includes('instant') &&
@@ -334,9 +335,7 @@ function buildThinkingTimeExpression(level: ThinkingTimeLevel): string {
       if (!menu) return null;
       const target = findOptionInMenu(menu, { currentIntelligence: true });
       if (!target) {
-        const slider = menu.querySelector(
-          '[data-model-reasoning-effort-slider] [role="slider"][aria-valuemax]'
-        );
+        const slider = menu.querySelector('[role="slider"][aria-valuemax]');
         if (TARGET_LEVEL !== 'pro' || !slider) return null;
         const max = Number(slider.getAttribute('aria-valuemax'));
         const before = Number(slider.getAttribute('aria-valuenow'));
@@ -346,9 +345,7 @@ function buildThinkingTimeExpression(level: ThinkingTimeLevel): string {
           slider.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', code: 'End', bubbles: true }));
           slider.dispatchEvent(new KeyboardEvent('keyup', { key: 'End', code: 'End', bubbles: true }));
           await sleep(STEP_WAIT_MS);
-          const updated = findCurrentIntelligenceMenu()?.querySelector(
-            '[data-model-reasoning-effort-slider] [role="slider"][aria-valuemax]'
-          ) ?? slider;
+          const updated = findCurrentIntelligenceMenu()?.querySelector('[role="slider"][aria-valuemax]') ?? slider;
           if (Number(updated.getAttribute('aria-valuenow')) < max) return null;
         }
         return { status: before >= max ? 'already-selected' : 'switched', label: 'Pro' };

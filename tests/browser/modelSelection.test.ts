@@ -96,9 +96,18 @@ class FakeDocument extends EventTarget {
   querySelectorAll(selector: string) {
     if (
       selector.includes('data-testid="model-switcher-dropdown-button"') ||
+      selector.includes('aria-label="Select ChatGPT model"') ||
       selector.includes("__composer-pill")
     ) {
-      return this.modelCandidates;
+      return this.modelCandidates.filter(
+        (node) =>
+          (selector.includes('data-testid="model-switcher-dropdown-button"') &&
+            node.getAttribute("data-testid") === "model-switcher-dropdown-button") ||
+          (selector.includes('aria-label="Select ChatGPT model"') &&
+            node.getAttribute("aria-label") === "Select ChatGPT model") ||
+          (selector.includes("__composer-pill") &&
+            node.getAttribute("class")?.includes("__composer-pill")),
+      );
     }
     if (selector.includes('[role="menu"]') || selector.includes("data-radix-collection-root")) {
       return this.menus;
@@ -153,6 +162,22 @@ const runModelSelectionExpression = async (
 };
 
 describe("browser model selection matchers", () => {
+  it("uses the current ChatGPT model control when Latest is selected", async () => {
+    const button = new FakeElement("Thinking effortPro", {
+      "aria-label": "Select ChatGPT model",
+      "aria-haspopup": "menu",
+    });
+    const latest = new FakeElement("Latest", { role: "menuitemradio", "aria-checked": "true" });
+    const menu = new FakeElement("", { role: "menu" }, [latest]);
+
+    expect(await runModelSelectionExpression("Latest", new FakeDocument([button], [menu]))).toEqual(
+      {
+        status: "already-selected",
+        label: "Latest",
+      },
+    );
+  });
+
   it.each([false, true])(
     "selects the literal Latest option (already selected: %s)",
     async (selected) => {
