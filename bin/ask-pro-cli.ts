@@ -561,7 +561,7 @@ function browserRuntimeMetadata(value: unknown): { tabUrl?: string } {
 }
 
 function isConversationUrl(value: string): boolean {
-  return /^https:\/\/chatgpt\.com\/c\/[a-z0-9-]+/i.test(value);
+  return /^https:\/\/chatgpt\.com\/c\/[a-z0-9-]+(?:[/?#]|$)/i.test(value);
 }
 
 interface BrowserMetadata {

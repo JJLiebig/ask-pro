@@ -532,7 +532,7 @@ describe("ask-pro cli", () => {
     expect(stdout).toContain('  language: "en-US,en"\n');
   }, 30000);
 
-  test("prints recoverable non-temporary conversation url when known", async () => {
+  test("prints only saved non-temporary conversation URLs", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-browser-url-"));
     tempDirs.push(cwd);
 
@@ -578,6 +578,18 @@ describe("ask-pro cli", () => {
 
     expect(stderr).toBe("");
     expect(stdout).toContain('  conversation_url: "https://chatgpt.com/c/recoverable-thread"\n');
+
+    await fs.writeFile(
+      path.join(cwd, ".ask-pro", "sessions", sessions[0]!, "browser.json"),
+      `${JSON.stringify({ temporary: false, runtime: { tabUrl: "https://chatgpt.com/c/WEB:provisional" } })}\n`,
+      "utf8",
+    );
+    const provisional = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--status"],
+      { cwd },
+    );
+    expect(provisional.stdout).not.toContain("conversation_url");
   }, 30000);
 
   test("omits conversation url for temporary chat metadata", async () => {

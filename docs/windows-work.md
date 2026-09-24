@@ -87,5 +87,6 @@ Future Windows gotchas belong here.
   `inline-markdown` citations. Capture the root to keep the full answer.
 - September 24: ChatGPT may first route a submitted prompt through a provisional
   `/c/WEB:...` URL. Do not save or reload that route as a conversation; wait for
-  the final conversation ID. A browser observer that never settles must still
-  obey the response deadline, including any reload attempt.
+  the final conversation ID or print it as a recovery link. A browser observer
+  that never settles must still obey the response deadline, including any reload
+  attempt.
