@@ -59,7 +59,12 @@ import type { LaunchedChrome } from "chrome-launcher";
 import { AssistantStoppedError, BrowserAutomationError } from "./errors.js";
 import { defaultAskProBrowserProfileDir } from "./profilePaths.js";
 import { applyPageLanguageOverrides, seedChromeProfileLanguage } from "./language.js";
-import { alignPromptEchoPair, buildPromptEchoMatcher, withTimeout } from "./reattachHelpers.js";
+import {
+  alignPromptEchoPair,
+  buildPromptEchoMatcher,
+  extractConversationIdFromUrl,
+  withTimeout,
+} from "./reattachHelpers.js";
 import type { ManagedChromeRunLease, ProfileRunLock } from "./profileState.js";
 import {
   cleanupStaleProfileState,
@@ -2958,7 +2963,9 @@ export const __test__ = {
   isLoginRecoveryUrl,
   isEligibleManualLoginRecoveryTarget,
   isRecoveredTargetOwned,
+  isConversationUrl,
   waitForLogin,
+  waitForAssistantResponseWithReload,
 };
 export { syncCookies } from "./cookies.js";
 export {
@@ -2994,6 +3001,7 @@ async function waitForAssistantResponseWithReload(
   expectedConversationId?: string,
   continueResponse?: (turnIndex: number) => Promise<number>,
 ) {
+  const deadline = Date.now() + timeoutMs;
   try {
     return await waitForAssistantResponse(
       Runtime,
@@ -3011,12 +3019,14 @@ async function waitForAssistantResponseWithReload(
     if (!conversationUrl || !isConversationUrl(conversationUrl)) {
       throw error;
     }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw error;
     logger("Assistant response stalled; reloading conversation and retrying once");
     await Page.navigate({ url: conversationUrl });
     await delay(1000);
     return await waitForAssistantResponse(
       Runtime,
-      timeoutMs,
+      Math.max(1, deadline - Date.now()),
       logger,
       minTurnIndex,
       expectedConversationId,
@@ -3218,7 +3228,7 @@ async function readConversationTurnCount(
 }
 
 function isConversationUrl(url: string): boolean {
-  return /\/c\/[a-z0-9-]+/i.test(url);
+  return Boolean(extractConversationIdFromUrl(url));
 }
 
 function describeDevtoolsFirewallHint(host: string, port: number): string | null {
@@ -3238,11 +3248,6 @@ function isWsl(): boolean {
   if (process.platform !== "linux") return false;
   if (process.env.WSL_DISTRO_NAME) return true;
   return os.release().toLowerCase().includes("microsoft");
-}
-
-function extractConversationIdFromUrl(url: string): string | undefined {
-  const match = url.match(/\/c\/([a-zA-Z0-9-]+)/);
-  return match?.[1];
 }
 
 async function resolveUserDataBaseDir(): Promise<string> {

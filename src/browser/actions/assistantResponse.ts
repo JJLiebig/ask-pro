@@ -168,6 +168,8 @@ async function waitForAssistantResponseOnce(
     const winner = await Promise.race([raceReadyEvaluation, pollerPromise]);
     if (winner.kind === "poll") {
       if (!winner.value) {
+        evaluationPromise.catch(() => undefined);
+        await terminateRuntimeExecution(Runtime);
         throw { source: "poll" as const, error: new Error(ASSISTANT_POLL_TIMEOUT_ERROR) };
       }
       logger("Captured assistant response via snapshot watchdog");
@@ -191,7 +193,7 @@ async function waitForAssistantResponseOnce(
         error instanceof Error &&
         error.message === ASSISTANT_POLL_TIMEOUT_ERROR
       ) {
-        evaluation = await evaluationPromise;
+        throw new Error("Timed out waiting for assistant response");
       } else if (source === "poll") {
         pollerAbort.abort();
         throw error;

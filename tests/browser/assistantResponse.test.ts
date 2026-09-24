@@ -156,6 +156,22 @@ describe("assistant response actions", () => {
     await pending;
   });
 
+  test("expires when the browser observer never settles", async () => {
+    vi.useFakeTimers();
+    const runtime = {
+      evaluate: vi.fn(({ expression }: { expression: string }) =>
+        expression.includes("captureViaObserver")
+          ? new Promise(() => {})
+          : Promise.resolve({ result: { value: null } }),
+      ),
+    } as unknown as ChromeClient["Runtime"];
+    const pending = expect(
+      waitForAssistantResponse(runtime, 1000, vi.fn() as unknown as BrowserLogger),
+    ).rejects.toThrow("Timed out waiting for assistant response");
+    await vi.advanceTimersByTimeAsync(2000);
+    await pending;
+  });
+
   test("recovery waits for completion instead of accepting partial text", async () => {
     vi.useFakeTimers();
     const runtime = {

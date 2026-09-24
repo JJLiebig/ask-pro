@@ -38,6 +38,44 @@ describe("shouldPreserveBrowserOnErrorForTest", () => {
   });
 });
 
+test("does not restart the response timeout after a stalled browser observer", async () => {
+  vi.useFakeTimers();
+  try {
+    const runtime = {
+      evaluate: vi.fn(({ expression }: { expression: string }) =>
+        expression.includes("captureViaObserver")
+          ? new Promise(() => {})
+          : Promise.resolve({ result: { value: null } }),
+      ),
+    };
+    const page = { navigate: vi.fn() };
+    const pending = expect(
+      __test__.waitForAssistantResponseWithReload(
+        runtime as never,
+        page as never,
+        1000,
+        vi.fn<(message: string) => void>(),
+        undefined,
+        "https://chatgpt.com/c/795d079e-6c4d-4334-b0ae-4534c70305bd",
+      ),
+    ).rejects.toThrow("Timed out waiting for assistant response");
+    await vi.advanceTimersByTimeAsync(2000);
+    await pending;
+    expect(page.navigate).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("main browser flow waits past provisional ChatGPT conversation routes", () => {
+  expect(
+    __test__.isConversationUrl("https://chatgpt.com/c/WEB:795d079e-6c4d-4334-b0ae-4534c70305bd"),
+  ).toBe(false);
+  expect(
+    __test__.isConversationUrl("https://chatgpt.com/c/795d079e-6c4d-4334-b0ae-4534c70305bd"),
+  ).toBe(true);
+});
+
 describe("runSubmissionWithRecoveryForTest", () => {
   test("preserves prompt-too-large fallback after a dead-composer retry", async () => {
     const submit = vi

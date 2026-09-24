@@ -40,7 +40,7 @@ export function pickTarget(
 
 export function extractConversationIdFromUrl(url: string): string | undefined {
   if (!url) return undefined;
-  const match = url.match(/\/c\/([a-zA-Z0-9-]+)/);
+  const match = url.match(/\/c\/([a-zA-Z0-9-]+)(?:[/?#]|$)/);
   return match?.[1];
 }
 
@@ -49,7 +49,7 @@ export function buildConversationUrl(
   baseUrl: string,
 ): string | null {
   if (runtime.tabUrl) {
-    if (runtime.tabUrl.includes("/c/")) {
+    if (extractConversationIdFromUrl(runtime.tabUrl)) {
       return runtime.tabUrl;
     }
     return null;

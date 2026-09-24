@@ -4,6 +4,10 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { resumeBrowserSession } from "../../src/browser/reattach.js";
 import { AssistantStoppedError } from "../../src/browser/errors.js";
+import {
+  buildConversationUrl,
+  extractConversationIdFromUrl,
+} from "../../src/browser/reattachHelpers.js";
 import type { ChromeClient } from "../../src/browser/types.js";
 
 const tempDirs: string[] = [];
@@ -13,6 +17,35 @@ afterEach(async () => {
 });
 
 describe("reattach browser lease", () => {
+  test("discards a stored provisional route before recovering an interrupted session", async () => {
+    const recoverSession = vi.fn().mockResolvedValue({
+      answerText: "Recovered answer",
+      answerMarkdown: "Recovered answer",
+      chromeMode: "relaunched",
+    });
+    await resumeBrowserSession(
+      {
+        tabUrl: "https://chatgpt.com/c/WEB:795d079e-6c4d-4334-b0ae-4534c70305bd",
+        conversationId: "WEB",
+      },
+      {},
+      vi.fn<(message: string) => void>(),
+      { recoverSession },
+    );
+    expect(recoverSession).toHaveBeenCalledWith(
+      expect.objectContaining({ tabUrl: undefined, conversationId: undefined }),
+      {},
+    );
+  });
+  test("does not treat ChatGPT's provisional WEB route as a saved conversation", () => {
+    const provisional = "https://chatgpt.com/c/WEB:795d079e-6c4d-4334-b0ae-4534c70305bd";
+    const saved = "https://chatgpt.com/c/795d079e-6c4d-4334-b0ae-4534c70305bd";
+    expect(extractConversationIdFromUrl(provisional)).toBeUndefined();
+    expect(
+      buildConversationUrl({ tabUrl: provisional, conversationId: "WEB" }, "https://chatgpt.com/"),
+    ).toBeNull();
+    expect(extractConversationIdFromUrl(saved)).toBe("795d079e-6c4d-4334-b0ae-4534c70305bd");
+  });
   test("returns an exhausted continuation to the caller instead of relaunching", async () => {
     const recoverSession = vi.fn();
     const client = {

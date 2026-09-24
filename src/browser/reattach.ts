@@ -189,6 +189,9 @@ export async function resumeBrowserSession(
   logger: BrowserLogger,
   deps: ReattachDeps = {},
 ): Promise<ReattachResult> {
+  if (runtime.conversationId === "WEB" && runtime.tabUrl?.includes("/c/WEB:")) {
+    runtime = { ...runtime, conversationId: undefined, tabUrl: undefined };
+  }
   deps = { ...deps, continuationState: deps.continuationState ?? { used: false } };
   const recoverSession =
     deps.recoverSession ??

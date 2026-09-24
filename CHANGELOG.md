@@ -10,6 +10,9 @@
 
 ### Fixed
 
+- Wait for a saved ChatGPT conversation after its provisional `WEB:` route,
+  recover interrupted sessions with that route, and keep response capture and
+  reloads within the configured timeout.
 - Capture the full answer in ChatGPT's current Markdown layout instead of an
   inline citation from the last paragraph.
 - Find ChatGPT's renamed model button and current Pro power slider before
