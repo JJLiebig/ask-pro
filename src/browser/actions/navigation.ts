@@ -1,5 +1,5 @@
 import type { ChromeClient, BrowserLogger } from "../types.js";
-import { CLOUDFLARE_SCRIPT_SELECTOR, CLOUDFLARE_TITLE, INPUT_SELECTORS } from "../constants.js";
+import { CLOUDFLARE_TITLE, INPUT_SELECTORS } from "../constants.js";
 import { delay } from "../utils.js";
 import { logDomFailure } from "../domDebug.js";
 import { BrowserAutomationError } from "../errors.js";
@@ -481,18 +481,18 @@ async function waitForPrompt(
 }
 
 async function isCloudflareInterstitial(Runtime: ChromeClient["Runtime"]): Promise<boolean> {
-  const { result: titleResult } = await Runtime.evaluate({
-    expression: "document.title",
-    returnByValue: true,
-  });
-  const title = typeof titleResult.value === "string" ? titleResult.value : "";
-  const challengeTitle = CLOUDFLARE_TITLE.toLowerCase();
-  if (title.toLowerCase().includes(challengeTitle)) {
-    return true;
-  }
-
   const { result } = await Runtime.evaluate({
-    expression: `Boolean(document.querySelector('${CLOUDFLARE_SCRIPT_SELECTOR}'))`,
+    expression: `(() => {
+      if (!document.title.toLowerCase().includes(${JSON.stringify(CLOUDFLARE_TITLE)})) return false;
+      const composers = document.querySelectorAll(${JSON.stringify(INPUT_SELECTORS.join(","))});
+      return !Array.from(composers).some((node) => {
+        if (node.hasAttribute('disabled') || node.closest('[hidden],[aria-hidden="true"],[inert]')) return false;
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+      });
+    })()`,
     returnByValue: true,
   });
   return Boolean(result.value);

@@ -5,7 +5,7 @@ import {
   runSubmissionWithRecoveryForTest,
   shouldPreserveBrowserOnErrorForTest,
 } from "../../src/browser/index.js";
-import { ensureLoggedIn } from "../../src/browser/pageActions.js";
+import { ensureLoggedIn, ensureNotBlocked } from "../../src/browser/pageActions.js";
 import { BrowserAutomationError } from "../../src/browser/errors.js";
 
 describe("shouldPreserveBrowserOnErrorForTest", () => {
@@ -363,6 +363,46 @@ describe("launch tab cleanup", () => {
         "other-blank",
       ),
     ).toEqual(["launch-blank"]);
+  });
+});
+
+describe("navigation challenge detection", () => {
+  test.each([
+    { title: "ChatGPT", composerVisible: true, scriptPresent: true, blocked: false },
+    { title: "ChatGPT", composerVisible: false, scriptPresent: true, blocked: false },
+    { title: "Just a moment...", composerVisible: true, scriptPresent: true, blocked: false },
+    { title: "Just a moment...", composerVisible: false, scriptPresent: false, blocked: true },
+  ])("$title with composerVisible=$composerVisible: blocked=$blocked", async (page) => {
+    const composer = {
+      closest: () => null,
+      hasAttribute: () => false,
+      getBoundingClientRect: () => ({ width: 548, height: page.composerVisible ? 26 : 0 }),
+    };
+    const document = {
+      title: page.title,
+      body: { textContent: "Library is now Space" },
+      querySelector: (selector: string) =>
+        selector.startsWith("script") ? (page.scriptPresent ? {} : null) : composer,
+      querySelectorAll: () => [composer],
+    };
+    const Runtime = {
+      evaluate: async ({ expression }: { expression: string }) => ({
+        result: {
+          value: new Function("document", "getComputedStyle", `return ${expression}`)(
+            document,
+            () => ({ display: "block", visibility: "visible", opacity: "1" }),
+          ),
+        },
+      }),
+    };
+    const result = ensureNotBlocked(Runtime as never, false, () => {});
+    if (page.blocked) {
+      await expect(result).rejects.toMatchObject({
+        details: { stage: "cloudflare-challenge" },
+      });
+    } else {
+      await expect(result).resolves.toBeUndefined();
+    }
   });
 });
 

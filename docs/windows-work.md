@@ -69,6 +69,11 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 
 Future Windows gotchas belong here.
 
+- September 30: signed-in ChatGPT loads a `/challenge-platform/` script even
+  while its composer and the "Library is now Space" notice are visible. Script
+  presence is not a blocking challenge. Navigation only treats the Cloudflare
+  interstitial title as blocking when no visible enabled composer is available;
+  active login, MFA, and CAPTCHA surfaces remain handled by the intervention monitor.
 - September 10: the model picker exposes `Latest` (currently `6 Pro`). Select the
   literal `Latest` option and keep the reasoning slider on `Pro`. Tool work appears
   inside `[data-streaming-response-status]`; it is progress, not answer content.
