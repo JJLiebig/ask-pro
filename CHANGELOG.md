@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Ignore background Cloudflare scripts and unrelated notices on usable ChatGPT
+  pages instead of reporting a browser challenge.
 - Wait for a saved ChatGPT conversation after its provisional `WEB:` route,
   recover interrupted sessions with that route, and keep response capture and
   reloads within the configured timeout.

@@ -41,7 +41,6 @@ export const CONVERSATION_TURN_SELECTOR =
   "article[data-turn], div[data-turn], section[data-turn]";
 export const ASSISTANT_ROLE_SELECTOR =
   '[data-message-author-role="assistant"], [data-turn="assistant"]';
-export const CLOUDFLARE_SCRIPT_SELECTOR = 'script[src*="/challenge-platform/"]';
 export const CLOUDFLARE_TITLE = "just a moment";
 export const PROMPT_PRIMARY_SELECTOR = "#prompt-textarea";
 export const PROMPT_FALLBACK_SELECTOR = 'textarea[name="prompt-textarea"]';
