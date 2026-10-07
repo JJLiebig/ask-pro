@@ -79,7 +79,8 @@ cwd and backslash paths are normalized to relative POSIX manifest paths. Prefer
 In cached-runner fallback mode, this is required whenever the files belong to a
 different repo than the cached plugin runner.
 
-Do not expose model/preset complexity in the CLI. Select `Latest`, then
+Do not expose model/preset complexity in the CLI. Select `Latest` when available,
+otherwise the highest numbered available GPT model, then
 `Pro` intelligence in ChatGPT's picker.
 Fresh runs try Temporary Chat by default and automatically retry in normal
 ChatGPT if the current account hides Pro models there. `--temporary` makes
@@ -98,7 +99,7 @@ bundles, and recoverability-sensitive work, agents should prefer
 4. open or attach to ChatGPT browser
 5. start in Temporary Chat unless `--no-temporary` is set
 6. fall back to normal ChatGPT if the default Temporary Chat path hides Pro
-7. select `Latest`
+7. select `Latest` when available, otherwise the highest numbered available GPT model
 8. select `Pro` intelligence
 9. upload context
 10. submit

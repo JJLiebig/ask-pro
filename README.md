@@ -71,7 +71,8 @@ Ask for a recoverable repo consult:
 ask-pro --no-temporary --prompt-file question.md --files src --files tests
 ```
 
-ask-pro selects `Latest` with `Pro` intelligence. It has no repo or conversation
+ask-pro selects `Latest` when available, otherwise the highest numbered available
+GPT model, with `Pro` intelligence. It has no repo or conversation
 context unless you provide it, so keep the prompt and file bundle focused.
 
 Request generated files only when needed; treat them as data and never execute

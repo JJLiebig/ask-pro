@@ -299,7 +299,7 @@ function buildModelSelectionExpression(
       return { status: 'already-selected', label };
     }
     const buttonMatchesTarget = () => {
-      // The numbered pill cannot prove that the rolling Latest option is selected.
+      // The composer pill cannot prove that the newest available model is selected.
       if (normalizedTarget === 'latest') return false;
       const normalizedLabel = normalize(getButtonLabel());
       if (!normalizedLabel) return false;
@@ -476,14 +476,24 @@ function buildModelSelectionExpression(
             testid.toLowerCase().includes('submenu') ||
             option.getAttribute('data-has-submenu') !== null ||
             option.getAttribute('aria-haspopup') === 'menu';
-          const baseScore = scoreOption(normalizedText, testid);
+          if (normalizedTarget === 'latest') {
+            const rect = option.getBoundingClientRect();
+            if (isSubmenu || rect.width <= 0 || rect.height <= 0 ||
+                option.getAttribute('aria-disabled') === 'true' || option.hasAttribute('disabled')) continue;
+          }
+          // Read the raw label: normalization removes decimal separators.
+          const modelVersion = normalizedTarget === 'latest'
+            ? text.trim().match(/^gpt[-\\s]+(\\d+(?:\\.\\d+)*)(?![.\\d])/i)?.[1] ?? ''
+            : '';
+          const baseScore = modelVersion ? 500 : scoreOption(normalizedText, testid);
           if (baseScore <= 0) {
             continue;
           }
           const score = baseScore + (isSubmenu ? 0 : 1);
           const label = getOptionLabel(option);
-          if (!bestMatch || score > bestMatch.score) {
-            bestMatch = { node: option, label, score, testid, normalizedText, isSubmenu };
+          if (!bestMatch || score > bestMatch.score ||
+              (score === bestMatch.score && modelVersion.localeCompare(bestMatch.modelVersion, 'en', { numeric: true }) > 0)) {
+            bestMatch = { node: option, label, score, testid, normalizedText, isSubmenu, modelVersion };
           }
         }
       }

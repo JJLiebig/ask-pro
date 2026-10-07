@@ -35,6 +35,10 @@ class FakeElement extends EventTarget {
     this.attrs.set(name, value);
   }
 
+  hasAttribute(name: string) {
+    return this.attrs.has(name);
+  }
+
   getBoundingClientRect() {
     if (this.attrs.get("data-hidden") === "true") {
       return { height: 0, width: 0 };
@@ -80,6 +84,17 @@ class FakeDocument extends EventTarget {
   }
 
   querySelector(selector: string) {
+    if (selector.includes('aria-label="Select model"')) {
+      return (
+        this.menus
+          .flatMap((menu) => menu.querySelectorAll())
+          .find(
+            (node) =>
+              node.getAttribute("aria-label") === "Select model" &&
+              node.getAttribute("aria-expanded") === "false",
+          ) ?? null
+      );
+    }
     if (selector.includes('[role="menu"]') || selector.includes("data-radix-collection-root")) {
       return this.menus[0] ?? null;
     }
@@ -180,17 +195,77 @@ describe("browser model selection matchers", () => {
     },
   );
 
-  it("does not accept a dated model when Latest is missing", async () => {
-    const pill = new FakeElement("GPT-5.6 Sol", {
-      "data-testid": "model-switcher-dropdown-button",
+  it.each([
+    [["GPT-6", "GPT-5.6 Sol", "GPT-5.5"], "GPT-6", false],
+    [["GPT-5.9", "GPT-5.10", "GPT-5.6 Sol"], "GPT-5.10", false],
+    [["GPT-6", "GPT-7", "GPT-5.6 Sol"], "GPT-7", false],
+    [["GPT-6", "GPT-7Leaving on October 14"], "GPT-7Leaving on October 14", false],
+    [["GPT-7", "Latest", "GPT-6"], "Latest", false],
+    [["GPT-6", "GPT-5.6 Sol"], "GPT-6", true],
+  ])("selects the newest model from %j", async (labels, expected, selected) => {
+    const clicks: string[] = [];
+    const pill = new FakeElement("Pro", { class: "__composer-pill", "aria-haspopup": "menu" });
+    const options = labels.map((label) => {
+      const option = new FakeElement(
+        label,
+        { role: "menuitemradio", "aria-checked": String(selected && label === expected) },
+        [],
+        () => {
+          clicks.push(label);
+          option.setAttribute("aria-checked", "true");
+        },
+      );
+      return option;
     });
+    const menu = new FakeElement("", {}, options);
+    const result = await runModelSelectionExpression("Latest", new FakeDocument([pill], [menu]), {
+      fastTimeout: true,
+    });
+    expect(result).toEqual({ status: selected ? "already-selected" : "switched", label: expected });
+    expect(clicks).toEqual(selected ? [] : [expected]);
+  });
+
+  it("ignores hidden, disabled, and submenu model candidates", async () => {
+    const pill = new FakeElement("Pro", { class: "__composer-pill", "aria-haspopup": "menu" });
+    const current = new FakeElement("GPT-6", { role: "menuitemradio", "aria-checked": "true" });
     const menu = new FakeElement("", {}, [
-      new FakeElement("GPT-5.6 Sol", { "aria-checked": "true" }),
+      new FakeElement("Latest", { "data-hidden": "true" }),
+      new FakeElement("GPT-9", { "data-hidden": "true" }),
+      new FakeElement("GPT-8", { "aria-disabled": "true" }),
+      new FakeElement("GPT-7", { disabled: "" }),
+      new FakeElement("GPT-10", { "aria-haspopup": "menu" }),
+      current,
     ]);
     const result = await runModelSelectionExpression("Latest", new FakeDocument([pill], [menu]), {
       fastTimeout: true,
     });
+    expect(result).toEqual({ status: "already-selected", label: "GPT-6" });
+  });
+
+  it("fails when neither Latest nor a numbered GPT model is available", async () => {
+    const pill = new FakeElement("6 Pro", { class: "__composer-pill", "aria-haspopup": "menu" });
+    const menu = new FakeElement("", {}, [new FakeElement("Pro", { "aria-checked": "true" })]);
+    const result = await runModelSelectionExpression("Latest", new FakeDocument([pill], [menu]), {
+      fastTimeout: true,
+    });
     expect(result.status).toBe("option-not-found");
+  });
+
+  it("opens the model view before choosing the newest GPT row", async () => {
+    const pill = new FakeElement("Pro", { class: "__composer-pill", "aria-haspopup": "menu" });
+    const current = new FakeElement("GPT-6", { role: "menuitemradio", "aria-checked": "true" });
+    const modelView = new FakeElement(
+      "Select model",
+      { role: "menuitem", "aria-label": "Select model", "aria-expanded": "false" },
+      [],
+      () => {
+        modelView.setAttribute("aria-expanded", "true");
+        document.menus.push(new FakeElement("", {}, [current]));
+      },
+    );
+    const document = new FakeDocument([pill], [new FakeElement("", {}, [modelView])]);
+    const result = await runModelSelectionExpression("Latest", document, { fastTimeout: true });
+    expect(result).toEqual({ status: "already-selected", label: "GPT-6" });
   });
 
   it("keeps retained model labels version-specific", () => {

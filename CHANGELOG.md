@@ -10,6 +10,8 @@
 
 ### Fixed
 
+- Prefer ChatGPT's `Latest` model when available, otherwise select the highest
+  numbered available GPT model and confirm `Pro` intelligence.
 - Ignore background Cloudflare scripts and unrelated notices on usable ChatGPT
   pages instead of reporting a browser challenge.
 - Wait for a saved ChatGPT conversation after its provisional `WEB:` route,
