@@ -58,7 +58,8 @@ When invoked:
    `harvest` command when that is the next action.
 8. Treat the answer as advisory; turn it into your own plan before editing code.
 
-`ask-pro` selects `Latest`, then `Pro` intelligence. Do not require a
+`ask-pro` selects `Latest` when available, otherwise the highest numbered available
+GPT model, then `Pro` intelligence. Do not require a
 different dated model label or a separate thinking-effort control in the prompt
 or workflow.
 

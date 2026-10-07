@@ -44,9 +44,10 @@ Read this when working on `ask_pro` from Windows and add new findings here.
   20 seconds, and force-terminates the process only if Chrome does not exit.
 - Mutable session metadata retries transient Windows `EPERM` and `EBUSY`
   replacement failures before reporting an error.
-- The ChatGPT picker exposes `Latest` under Advanced > Model and a
+- The ChatGPT picker exposes model rows under Select model and a
   five-step reasoning-effort slider with `Pro` at the maximum. ask-pro selects
-  or confirms both before submission.
+  or confirms both before submission, preferring `Latest` when available and
+  otherwise the highest numbered available GPT model.
 - Ordinary managed Chrome runs start minimized, then hide the native Windows
   browser window after isolated-tab setup. This keeps it out of normal desktop
   interaction and avoids repeating minimize/restore composition transitions
@@ -69,6 +70,11 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 
 Future Windows gotchas belong here.
 
+- October 7: the live Select model view exposes `GPT-6`, `GPT-5.6 Sol`, and
+  `GPT-5.5` instead of `Latest`. The default picker prefers `Latest` when present,
+  otherwise compares visible enabled terminal GPT versions numerically. Pro
+  remains a separate requirement; a composer effort label does not prove which
+  model is selected.
 - September 30: signed-in ChatGPT loads a `/challenge-platform/` script even
   while its composer and the "Library is now Space" notice are visible. Script
   presence is not a blocking challenge. Navigation only treats the Cloudflare
