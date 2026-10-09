@@ -218,7 +218,7 @@ async function runAskProBrowserSessionWithLease({
         sessionId,
         "Temporary Chat did not expose the Pro model; retrying in normal ChatGPT.",
       );
-      await closeFallbackTemporaryTab(cwd, sessionId, logger);
+      await closeSessionBrowserTab(cwd, sessionId, logger);
       await updateAskProStatus({
         cwd,
         sessionId,
@@ -368,8 +368,9 @@ async function resumeAskProBrowserSessionWithLease({
   const fallbackProfile = await resolveResumeBrowserProfile(metadata);
   if (
     sessionStatus.status === "NEEDS_GITHUB_CONNECTION" ||
-    (sessionStatus.github && metadata.runtime?.submissionStarted === false)
+    (sessionStatus.github && metadata.runtime?.githubCheckPending === true)
   ) {
+    await closeSessionBrowserTab(cwd, sessionId, logger);
     await runAskProBrowserSessionWithLease({
       cwd,
       sessionId,
@@ -619,7 +620,7 @@ function withNoTemporaryResumeCommand(command: string): string {
   return withoutStrictTemporary.replace(/\s--resume(?=\s|$)/, " --no-temporary --resume");
 }
 
-async function closeFallbackTemporaryTab(
+async function closeSessionBrowserTab(
   cwd: string,
   sessionId: string,
   logger: BrowserLogger,
@@ -1033,7 +1034,7 @@ interface AskProBrowserMetadata {
   acceptLanguage?: string;
   chromeMode?: "launching" | "launched" | "reattaching" | "reused_devtools" | "relaunched";
   runtime?: {
-    submissionStarted?: boolean;
+    githubCheckPending?: boolean;
     chromePid?: number;
     chromePort?: number;
     chromeHost?: string;

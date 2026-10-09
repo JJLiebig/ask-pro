@@ -108,6 +108,8 @@ ask-pro --github "Read owner/repo and explain its request authentication flow."
 ```
 
 Use `--files` for local changes or a precise snapshot that GitHub cannot retrieve.
+For committed repository code, prefer `--github` with the repository, ref, paths,
+and question; source-file uploads are usually unnecessary when retrieval works.
 The flag requests read-only work and citations, but **does not enforce read-only
 GitHub permissions**. The live GitHub plugin advertises write capabilities;
 review the actual grant even though the [Help Center](https://help.openai.com/en/articles/11145903-connecting-github-to-chatgpt)

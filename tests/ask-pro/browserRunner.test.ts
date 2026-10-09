@@ -146,7 +146,7 @@ afterEach(async () => {
 
 describe("ask-pro browser runner", () => {
   test.each(["github", "login"])(
-    "resumes a GitHub request after a %s handoff without harvesting an unsent prompt",
+    "resumes a GitHub request after a %s handoff before its connection check completes",
     async (gate) => {
       const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-github-handoff-"));
       tempDirs.push(cwd);
@@ -164,7 +164,8 @@ describe("ask-pro browser runner", () => {
       const pause = async (options: { runtimeHintCb: (hint: unknown) => Promise<void> }) => {
         await options.runtimeHintCb({
           chromePort: 9224,
-          submissionStarted: false,
+          chromeTargetId: "github-setup-target",
+          githubCheckPending: true,
           tabUrl: "https://chatgpt.com/",
         });
         throw failure;
@@ -176,6 +177,12 @@ describe("ask-pro browser runner", () => {
       );
       runBrowserModeMock.mockImplementationOnce(pause as never);
       await expect(resumeAskProBrowserSession({ cwd, sessionId: session.id })).rejects.toThrow();
+      expect(closeTabMock).toHaveBeenLastCalledWith(
+        9224,
+        "github-setup-target",
+        expect.any(Function),
+        "127.0.0.1",
+      );
       runBrowserModeMock.mockImplementationOnce(async (...args: unknown[]) => {
         expect(args[0]).toMatchObject({ config: { github: true, url: "https://chatgpt.com/" } });
         return {
@@ -189,6 +196,23 @@ describe("ask-pro browser runner", () => {
         "# New GitHub answer\n",
       );
       expect(resumeBrowserSessionMock).not.toHaveBeenCalled();
+
+      await updateAskProStatus({ cwd, sessionId: session.id, status: "WAITING" });
+      await writeAskProBrowserMetadata({
+        cwd,
+        sessionId: session.id,
+        metadata: {
+          profileDir: testSharedProfileDir(),
+          temporary: false,
+          runtime: { chromePort: 9224, githubCheckPending: false },
+        },
+      });
+      runBrowserModeMock.mockClear();
+      closeTabMock.mockClear();
+      await resumeAskProBrowserSession({ cwd, sessionId: session.id });
+      expect(resumeBrowserSessionMock).toHaveBeenCalledTimes(1);
+      expect(runBrowserModeMock).not.toHaveBeenCalled();
+      expect(closeTabMock).not.toHaveBeenCalled();
     },
   );
 

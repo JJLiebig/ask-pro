@@ -34,11 +34,13 @@ When invoked:
 
 1. Inspect the repo and the relevant files.
 2. Identify the exact decision Pro should answer.
-3. Choose a small, high-signal file bundle with `--files`. When remote repository
-   context would help, use the optional Connected GitHub workflow below.
+3. For committed code on GitHub, prefer `--github` and give Pro the repository,
+   ref, relevant paths, and question. Let it retrieve the code instead of assembling
+   a source bundle. Add a small `--files` bundle only for uncommitted changes,
+   local-only evidence, or repository content the connection cannot access.
 4. Write the prompt yourself using the Prompt Shape below.
-5. Run the smallest useful command, usually
-   `ask-pro --no-temporary --files "<glob>" "<prompt>"` for repo advisories.
+5. Run the smallest useful command: `ask-pro --github "<prompt>"` for GitHub
+   evidence, or `ask-pro --no-temporary --files "<glob>" "<prompt>"` for a file bundle.
    For multiline prompts, write a temporary prompt file and use
    `ask-pro --no-temporary --prompt-file <path> --files "<glob>"`; do not rely
    on shell multiline quoting.
@@ -116,7 +118,7 @@ question is explicitly architectural.
 
 ## Connected GitHub (optional)
 
-Use `--github` for remote repository evidence when the user wants it. It checks
+Prefer `--github` for remote repository evidence. It checks
 the connection before uploading or submitting, and defaults to normal ChatGPT.
 Do not require GitHub for file-based consults. Availability varies by account,
 workspace, model, and ChatGPT experience.
@@ -137,15 +139,18 @@ The live GitHub plugin advertises write capabilities despite the Help Center's
 read-only description. `--github` requests read-only work; it does not restrict
 the provider's permissions or prove that writes are impossible.
 
-For the consult, use `--github` and name the repository (`owner/repo`),
-relevant paths, and requested branch or commit in the prompt. Explicitly ask Pro
+If GitHub is already connected, proceed without a setup question or source-file
+bundle. For the consult, name the repository (`owner/repo`), relevant paths, and
+requested branch or commit in the prompt. Explicitly ask Pro
 to answer the specific question. The wrapper requests the connected GitHub app,
 read-only work, citations, the revision inspected, and access gaps. Do not
 infer repository access from ChatGPT login or a successful CLI exit.
 
-Keep `--files` for local/uncommitted changes and exact snapshots. Distinguish
+Keep `--files` for local/uncommitted changes, non-GitHub evidence, and snapshots
+that the app cannot retrieve. Distinguish
 uploaded evidence from GitHub evidence, and ask Pro to flag revision conflicts.
-If the app or requested revision is unavailable, offer a new consult with a focused file bundle and
+If the app or requested revision is unavailable, offer a new consult with a
+focused file bundle and
 disclose that limitation. Do not silently switch away from Pro. The CLI submits
 text; it does not select an app in the composer or handle app approval prompts.
 Until a live run demonstrates retrieval, describe this as an available setup
@@ -186,6 +191,7 @@ state is `INCOMPLETE_ANSWER` / `preamble_without_artifacts`, do not treat
 ```bash
 ask-pro "Review the async billing webhook migration plan and return an implementation plan."
 ask-pro --no-temporary --prompt-file question.md --files src --files tests
+ask-pro --github "In owner/repo at <commit>, inspect src/auth and explain token validation."
 ask-pro --temporary "Review this sensitive migration plan, and fail if Temporary Chat cannot use Pro."
 ask-pro --no-temporary "Review this in normal ChatGPT instead of Temporary Chat."
 ask-pro --prompt-file question.md --files .\src
