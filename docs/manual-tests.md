@@ -168,6 +168,19 @@ should report `responseZip.status = "not_requested"`.
 
 ## Recent Smoke Runs
 
+- 2026-10-10 - GitHub onboarding trial
+  `2026-10-09T221451-return-a-short-markdown-answer-with-no-preamble--3f717c89`
+  paused with `NEEDS_GITHUB_CONNECTION` before upload or submission when the
+  connection UI was unconfirmed. After human setup, `--resume` passed the check,
+  selected Pro, and returned the correct migration marker and SHA-256/10-character
+  hash details from `src/browser/profilePaths.ts` at
+  `a673c37480ee516d14e8d1f7c395611ae49244a2`. The bundle contained no source files.
+  The answer reported GitHub file retrieval and the requested revision, but its
+  citation link was absent from the harvested Markdown and the activity panel
+  was not independently inspected. This proves the setup handoff/resume and
+  answer accuracy, not a verified tool trace or a definitively disconnected
+  initial account. Final recovery-only fixes were covered by the owning tests
+  and CI after this live run started.
 - 2026-07-10 - `2026-07-10T145226-return-exactly-one-line-and-nothing-else-ask-pro-d95f47cc`
   selected `GPT-5.6 Sol`, confirmed `Pro` intelligence, uploaded the README
   context bundle, harvested `ASK_PRO_GPT56_SOL_PRO_OK`, and completed browser
