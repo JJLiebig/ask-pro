@@ -4,6 +4,10 @@
 
 ### Added
 
+- Document optional native ChatGPT GitHub connection and teach the ask-pro skill
+  to request read-only repository evidence, preserve local-file context, and
+  report unavailable access. Include an opt-in retrieval smoke; no live GitHub
+  retrieval has been verified yet.
 - Add skills CLI installation for Codex and other supported agents using the
   standalone `ask-pro` npm CLI.
 - Publish `ask-pro` to npm after each passing main-branch CI run.

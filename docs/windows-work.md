@@ -28,6 +28,12 @@ Read this when working on `ask_pro` from Windows and add new findings here.
   follows a replacement DevTools port recorded by the managed profile.
   Challenge recovery requires a visible active challenge control or surface;
   queued composer text and class or ID substrings do not trigger it.
+- Optional GitHub connection happens in ChatGPT settings before starting a run,
+  using the same account and workspace as the managed browser. It can be set up
+  in the user's usual browser; do not copy browser cookies or GitHub tokens.
+  The managed login recovery automatically resumes on sign-in, so it is not a
+  pause for app setup. GitHub retrieval through the Pro path still needs the
+  opt-in check in `docs/manual-tests.md` on the target account.
 - Chrome DevTools state is recorded in each session's `browser.json`; use the
   saved port for DOM inspection when a live browser needs debugging.
 - Concurrent fresh and resumed runs on one managed profile use PID-backed

@@ -54,6 +54,39 @@ Expected:
   exist.
 - `status.json` reports a dry-run/prepared state.
 
+## Connected GitHub Context
+
+This is an opt-in live test. Complete the README's GitHub setup first, separately
+from an ask-pro run. Use the same ChatGPT account and workspace and authorize
+only the intended repository. Do not grant broader access just to make the test
+pass. No GitHub retrieval smoke has been recorded for this workflow yet.
+
+1. Pick an authorized repository and a file with a specific fact you can verify
+   independently, such as the behavior of a named function. Record the expected
+   fact and commit locally, without including the answer in the prompt.
+2. Write `github-question.md`, naming `owner/repo`, the path, requested commit,
+   and question. Ask Pro to retrieve the file through the connected GitHub app,
+   cite the source and revision actually read, make no changes, and explicitly
+   report unavailable access or a revision mismatch.
+3. Run without `--files`, so the answer cannot come from an uploaded source file:
+
+   ```powershell
+   ask-pro --no-temporary --prompt-file github-question.md
+   ask-pro --harvest <session-id>
+   ```
+
+4. Compare the answer against the independently recorded file. After the run has
+   finished, inspect the saved conversation's tool activity for GitHub retrieval
+   evidence. A plausible answer, a public web search, or `COMPLETED` alone is not
+   proof of connected-app use. Record the session, model, repository/ref, and
+   retrieval evidence without credentials or private source contents.
+
+If GitHub is unavailable, requires manual app selection/approval, or cannot read
+the requested revision, record the limitation; the CLI does not automate those
+steps. Keep Pro selected and use `--files` for the consult instead. A separate
+manual ChatGPT test does not prove ask-pro can invoke the app. Do not interact
+with the guarded run window while Pro is answering.
+
 ## First Login / Auth Gate
 
 Run a tiny prompt:

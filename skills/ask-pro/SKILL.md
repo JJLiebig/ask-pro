@@ -34,7 +34,8 @@ When invoked:
 
 1. Inspect the repo and the relevant files.
 2. Identify the exact decision Pro should answer.
-3. Choose a small, high-signal file bundle with `--files`.
+3. Choose a small, high-signal file bundle with `--files`. When remote repository
+   context would help, use the optional Connected GitHub workflow below.
 4. Write the prompt yourself using the Prompt Shape below.
 5. Run the smallest useful command, usually
    `ask-pro --no-temporary --files "<glob>" "<prompt>"` for repo advisories.
@@ -88,7 +89,7 @@ again. Example:
 
 ## Prompt Shape
 
-Assume Pro has no caller or repository context. Include each material fact and
+Assume Pro has no caller context or local checkout. Include each material fact and
 instruction once: the goal, current state, hard constraints, evidence, success
 criteria, and required output. Do not rely on the agent's conversation context, repo
 folklore, prior ask-pro runs, branch names, or unstated user preferences.
@@ -112,6 +113,41 @@ inline by default.
 Keep bundles focused: source files under review, focused tests, relevant docs,
 known recent changes, and validation status. Avoid whole-repo bundles unless the
 question is explicitly architectural.
+
+## Connected GitHub (optional)
+
+Use ChatGPT's native GitHub app for remote repository evidence when the user
+wants it. Reuse an existing connection; do not require setup for file-based
+consults. OpenAI documents this app as
+[read-only](https://help.openai.com/en/articles/11145903-connecting-github-to-chatgpt).
+Availability varies by account, workspace, model, and ChatGPT experience.
+
+For first setup, direct the human to ChatGPT in their usual browser, using the
+same account and workspace as ask-pro, then **Settings > Plugins > GitHub**
+(**Apps** on some interfaces). They complete sign-in, review permissions, and
+select repositories; organization approval may be needed. Complete setup before
+launching ask-pro. Its login recovery automatically continues on sign-in, so
+that pause is not a GitHub setup window. Never collect GitHub credentials or
+automate authorization.
+
+If available, GitHub's **Allow read actions** permission can avoid read approval
+prompts. The human chooses that setting. It controls approval behavior, not the
+underlying permissions of a write-capable app; see
+[app permissions](https://help.openai.com/en/articles/20001495-managing-app-permissions-in-chatgpt).
+
+For the consult, use `--no-temporary` and name the repository (`owner/repo`),
+relevant paths, and requested branch or commit in the prompt. Explicitly ask Pro
+to use the connected GitHub app, keep the work read-only, cite retrieved files
+and the revision actually inspected, and report inaccessible evidence. Do not
+infer repository access from ChatGPT login or a successful CLI exit.
+
+Keep `--files` for local/uncommitted changes and exact snapshots. Distinguish
+uploaded evidence from GitHub evidence, and ask Pro to flag revision conflicts.
+If the app or requested revision is unavailable, use a focused file bundle and
+disclose that limitation. Do not silently switch away from Pro. The CLI submits
+text; it does not select an app in the composer or handle app approval prompts.
+Until a live run demonstrates retrieval, describe this as an available setup
+path, not a verified connection. Confirm material claims against the repo.
 
 ## Output
 
