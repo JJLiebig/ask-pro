@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import "dotenv/config";
 import { AssistantStoppedError } from "../src/browser/errors.js";
+import { GITHUB_SETUP_URL, GitHubConnectionRequiredError } from "../src/browser/actions/github.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Command, Option } from "commander";
@@ -32,6 +33,7 @@ interface AskProOptions {
   files?: string[];
   promptFile?: string;
   artifacts?: boolean;
+  github?: boolean;
   responseZip?: boolean;
   resume?: string | boolean;
   status?: string | boolean;
@@ -54,6 +56,14 @@ program
   .option("--prompt-file <path>", "read the question from a UTF-8 file; use - for stdin")
   .option("--artifacts", "ask Pro for ask-pro-response.zip plus markdown fallback")
   .option("--response-zip", "alias for --artifacts")
+  .addOption(
+    new Option("--github", "use connected GitHub; pause for setup before sending").conflicts([
+      "resume",
+      "status",
+      "harvest",
+      "copy",
+    ]),
+  )
   .option("--resume [session-id]", "resume a prepared or waiting ask-pro session")
   .option("--status [session-id]", "show ask-pro session status")
   .option("--harvest [session-id]", "print harvested ANSWER.md for a session")
@@ -157,6 +167,7 @@ async function runAskPro(question: string, options: AskProOptions): Promise<void
   }
 
   const dryRun = options.dryRun === true;
+  if (options.github && options.temporary === undefined) options.temporary = false;
   const resolvedQuestion = await resolveQuestion(question, options, cwd);
   const artifacts = options.artifacts === true || options.responseZip === true;
   const session = await createAskProSession({
@@ -165,6 +176,7 @@ async function runAskPro(question: string, options: AskProOptions): Promise<void
     filePatterns: options.files ?? [],
     dryRun,
     artifacts,
+    github: options.github,
   });
   const resumeCommand = buildResumeCommand(session.id, options, cwd);
   const harvestCommand = buildHarvestCommand(session.id, cwd);
@@ -241,7 +253,8 @@ async function submitOrResumeBrowserSession(
     status.status === "WAITING" ||
     status.status === "WAIT_TIMED_OUT" ||
     status.status === "INCOMPLETE_ANSWER" ||
-    status.status === "NEEDS_USER_AUTH"
+    status.status === "NEEDS_USER_AUTH" ||
+    status.status === "NEEDS_GITHUB_CONNECTION"
   ) {
     try {
       await resumeAskProBrowserSession({
@@ -251,6 +264,11 @@ async function submitOrResumeBrowserSession(
         verbose: options.verbose,
       });
     } catch (error) {
+      if (error instanceof GitHubConnectionRequiredError) {
+        const { status: paused } = await readAskProStatus({ cwd, sessionId });
+        printStatusRecord(paused);
+        return;
+      }
       if (error instanceof AssistantStoppedError) {
         const { status: stopped } = await readAskProStatus({ cwd, sessionId });
         printStatusRecord(stopped, await readBrowserPreflight(cwd, stopped));
@@ -282,6 +300,11 @@ async function submitOrResumeBrowserSession(
       ...answerExtraForStatus(completed, sessionId),
     });
   } catch (error) {
+    if (error instanceof GitHubConnectionRequiredError) {
+      const { status: paused } = await readAskProStatus({ cwd, sessionId });
+      printStatusRecord(paused);
+      return;
+    }
     if (error instanceof AssistantStoppedError) {
       const { status: stopped } = await readAskProStatus({ cwd, sessionId });
       printStatusRecord(stopped, await readBrowserPreflight(cwd, stopped));
@@ -386,6 +409,12 @@ function printStatusRecord(status: AskProStatusFile, extra: AskProToonFields = {
     state: normalizeState(status.status),
     reason: status.reason,
     temporary: normalizeTemporary(status.temporary),
+    github: status.github || undefined,
+    setup_url: status.status === "NEEDS_GITHUB_CONNECTION" ? GITHUB_SETUP_URL : undefined,
+    help:
+      status.status === "NEEDS_GITHUB_CONNECTION"
+        ? "In the opened ChatGPT page, install GitHub if needed, connect your account, review repository access, then resume."
+        : undefined,
     action: actionForStatus(status),
     resume: shouldPrintResume(status) ? status.resumeCommand : undefined,
     harvest: shouldPrintHarvest(status) ? status.harvestCommand : undefined,
@@ -427,6 +456,8 @@ function normalizeTemporary(temporary: boolean | undefined): string {
 function actionForStatus(status: AskProStatusFile): string {
   if (status.reason === "stopped_without_answer") return "choose_resume_or_retry";
   switch (status.status) {
+    case "NEEDS_GITHUB_CONNECTION":
+      return "connect_github_then_resume";
     case "DRY_RUN_COMPLETE":
     case "INCOMPLETE_ANSWER":
     case "READY_TO_SUBMIT":
@@ -453,6 +484,7 @@ function shouldPrintResume(status: AskProStatusFile): boolean {
     "WAITING",
     "READY_TO_SUBMIT",
     "NEEDS_USER_AUTH",
+    "NEEDS_GITHUB_CONNECTION",
     "WAIT_TIMED_OUT",
     "FAILED",
   ].includes(status.status);

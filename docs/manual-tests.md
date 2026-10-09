@@ -56,10 +56,9 @@ Expected:
 
 ## Connected GitHub Context
 
-This is an opt-in live test. Complete the README's GitHub setup first, separately
-from an ask-pro run. Use the same ChatGPT account and workspace and authorize
-only the intended repository. Do not grant broader access just to make the test
-pass. No GitHub retrieval smoke has been recorded for this workflow yet.
+This is an opt-in live test. Use the ask-pro browser profile and authorize only
+the intended repository. Review the permissions shown by ChatGPT and GitHub;
+`--github` requests read-only work but does not restrict the app's permissions.
 
 1. Pick an authorized repository and a file with a specific fact you can verify
    independently, such as the behavior of a named function. Record the expected
@@ -71,11 +70,21 @@ pass. No GitHub retrieval smoke has been recorded for this workflow yet.
 3. Run without `--files`, so the answer cannot come from an uploaded source file:
 
    ```powershell
-   ask-pro --no-temporary --prompt-file github-question.md
-   ask-pro --harvest <session-id>
+   ask-pro --github --prompt-file github-question.md
    ```
 
-4. Compare the answer against the independently recorded file. After the run has
+4. With GitHub disconnected or its connection unconfirmed, expect
+   `NEEDS_GITHUB_CONNECTION`, an opened ChatGPT GitHub setup page, and a resume
+   command. No prompt or bundle should have been sent. Complete setup manually
+   after the command exits, then run the printed `--resume` command. Resuming
+   without completing setup should pause again; completing setup should submit
+   the original request once. Keep GitHub optional: a new run without `--github`
+   should still work without a connection. Do not disconnect an existing account
+   merely to test this path; use a separate profile/account.
+5. With GitHub already connected, expect the run to continue without setup.
+   Both paths use normal ChatGPT by default. Harvest the answer with
+   `ask-pro --harvest <session-id>`.
+6. Compare the answer against the independently recorded file. After the run has
    finished, inspect the saved conversation's tool activity for GitHub retrieval
    evidence. A plausible answer, a public web search, or `COMPLETED` alone is not
    proof of connected-app use. Record the session, model, repository/ref, and
@@ -83,7 +92,7 @@ pass. No GitHub retrieval smoke has been recorded for this workflow yet.
 
 If GitHub is unavailable, requires manual app selection/approval, or cannot read
 the requested revision, record the limitation; the CLI does not automate those
-steps. Keep Pro selected and use `--files` for the consult instead. A separate
+steps. Keep Pro selected and start a new consult with `--files` instead. A separate
 manual ChatGPT test does not prove ask-pro can invoke the app. Do not interact
 with the guarded run window while Pro is answering.
 

@@ -27,6 +27,33 @@ afterEach(async () => {
 });
 
 describe("ask-pro cli", () => {
+  test("keeps GitHub required across preparation and exposes a resumable setup handoff", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-github-"));
+    tempDirs.push(cwd);
+    const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
+    const tsxLoader = pathToFileURL(
+      path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
+    ).href;
+    const invoke = (...args: string[]) =>
+      execFileAsync(process.execPath, ["--import", tsxLoader, cli, ...args], { cwd });
+    const prepared = await invoke("--github", "--dry-run", "Read owner/repo.");
+    expect(prepared.stdout).toContain("  temporary: off\n");
+    const [id] = await fs.readdir(path.join(cwd, ".ask-pro", "sessions"));
+    const statusPath = path.join(cwd, ".ask-pro", "sessions", id!, "status.json");
+    const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
+    expect(status).toMatchObject({ github: true, temporary: false, status: "DRY_RUN_COMPLETE" });
+    await fs.writeFile(
+      statusPath,
+      JSON.stringify({ ...status, status: "NEEDS_GITHUB_CONNECTION" }),
+    );
+    const paused = await invoke("--status", id!);
+    expect(paused.stdout).toContain("  action: connect_github_then_resume\n");
+    expect(paused.stdout).toContain(`--resume ${id}`);
+    const harvest = await invoke("--harvest", id!);
+    expect(harvest.stdout).toContain("  state: needs_github_connection\n");
+    expect(harvest.stdout).not.toContain("# Dry Run");
+  }, 30000);
+
   test("documents the V1 switches", async () => {
     const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
     const tsxLoader = pathToFileURL(

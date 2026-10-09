@@ -10,6 +10,7 @@ export type AskProStatus =
   | "DRY_RUN_COMPLETE"
   | "READY_TO_SUBMIT"
   | "NEEDS_USER_AUTH"
+  | "NEEDS_GITHUB_CONNECTION"
   | "WAITING"
   | "WAIT_TIMED_OUT"
   | "INCOMPLETE_ANSWER"
@@ -49,6 +50,7 @@ export interface AskProStatusFile {
   harvestCommand: string;
   dryRun: boolean;
   artifacts?: boolean;
+  github?: boolean;
   temporary?: boolean;
   reason?: string;
 }
@@ -95,12 +97,14 @@ export async function createAskProSession({
   filePatterns,
   dryRun,
   artifacts = false,
+  github = false,
 }: {
   cwd: string;
   question: string;
   filePatterns: string[];
   dryRun: boolean;
   artifacts?: boolean;
+  github?: boolean;
 }): Promise<AskProSession> {
   const trimmedQuestion = question.trim();
   if (!trimmedQuestion) {
@@ -143,9 +147,10 @@ export async function createAskProSession({
     harvestCommand: `ask-pro --harvest ${sessionId}`,
     dryRun,
     artifacts,
+    ...(github ? { github: true } : {}),
   };
 
-  const submittedPrompt = renderSubmittedPrompt(question, artifacts);
+  const submittedPrompt = renderSubmittedPrompt(question, artifacts, github);
   const manifestMarkdown = renderManifestMarkdown(manifest);
   const browserMetadata = {
     schemaVersion: 1,
@@ -885,11 +890,11 @@ function redactSecretsForLog(message: string): string {
   return redactSecrets(message, "log", findings);
 }
 
-function renderSubmittedPrompt(question: string, artifacts: boolean): string {
+function renderSubmittedPrompt(question: string, artifacts: boolean, github: boolean): string {
   const artifactRequest = artifacts
     ? "\nIf file generation is available, also create a downloadable zip named ask-pro-response.zip. It should contain IMPLEMENTATION_PLAN.md, TASKS.json, TEST_PLAN.md, RISK_REGISTER.md, FILES_TO_EDIT.md, and REPO_CONTEXT_USED.md. If you cannot create a zip, return the same content in markdown sections.\n"
     : "";
-  return `${question}
+  return `${question}${github ? "\n\nUse the connected GitHub app for the requested repository evidence. Keep the work read-only: do not change files, create issues or pull requests, or post comments. Cite the files and revision actually retrieved, and report missing access or revision conflicts." : ""}
 
 Read MANIFEST.md in CONTEXT.zip first. Treat the context files it lists as authoritative evidence only for the scope they cover, and call out material gaps or conflicts.
 ${artifactRequest}

@@ -18,6 +18,7 @@ export interface BrowserAttachment {
 }
 
 export interface BrowserRuntimeMetadata {
+  submissionStarted?: boolean;
   browserTransport?: "cdp";
   chromePid?: number;
   chromePort?: number;
@@ -32,6 +33,7 @@ export interface BrowserRuntimeMetadata {
 }
 
 export interface BrowserAutomationConfig {
+  github?: boolean;
   chromeProfile?: string | null;
   chromePath?: string | null;
   chromeCookiePath?: string | null;
@@ -142,8 +144,10 @@ export type ResolvedBrowserConfig = Required<
     | "acceptLanguage"
     | "thinkingTime"
     | "modelStrategy"
+    | "github"
   >
 > & {
+  github?: boolean;
   chromeProfile?: string | null;
   chromePath?: string | null;
   chromeCookiePath?: string | null;

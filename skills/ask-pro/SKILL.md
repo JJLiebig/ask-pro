@@ -116,34 +116,36 @@ question is explicitly architectural.
 
 ## Connected GitHub (optional)
 
-Use ChatGPT's native GitHub app for remote repository evidence when the user
-wants it. Reuse an existing connection; do not require setup for file-based
-consults. OpenAI documents this app as
-[read-only](https://help.openai.com/en/articles/11145903-connecting-github-to-chatgpt).
-Availability varies by account, workspace, model, and ChatGPT experience.
+Use `--github` for remote repository evidence when the user wants it. It checks
+the connection before uploading or submitting, and defaults to normal ChatGPT.
+Do not require GitHub for file-based consults. Availability varies by account,
+workspace, model, and ChatGPT experience.
 
-For first setup, direct the human to ChatGPT in their usual browser, using the
-same account and workspace as ask-pro, then **Settings > Plugins > GitHub**
-(**Apps** on some interfaces). They complete sign-in, review permissions, and
-select repositories; organization approval may be needed. Complete setup before
-launching ask-pro. Its login recovery automatically continues on sign-in, so
-that pause is not a GitHub setup window. Never collect GitHub credentials or
-automate authorization.
+If the CLI returns `needs_github_connection` / `connect_github_then_resume`,
+direct the human to the opened GitHub page in ask-pro's browser. They install the
+plugin if needed, complete sign-in, review permissions, and select repositories;
+organization approval may be needed. Wait for them to finish, then run the
+emitted resume command without adding `--github`. The requirement is saved with
+the session and checked again. Do not start a second session or submit through
+the browser yourself. Never collect GitHub credentials or automate authorization.
 
 If available, GitHub's **Allow read actions** permission can avoid read approval
 prompts. The human chooses that setting. It controls approval behavior, not the
 underlying permissions of a write-capable app; see
 [app permissions](https://help.openai.com/en/articles/20001495-managing-app-permissions-in-chatgpt).
+The live GitHub plugin advertises write capabilities despite the Help Center's
+read-only description. `--github` requests read-only work; it does not restrict
+the provider's permissions or prove that writes are impossible.
 
-For the consult, use `--no-temporary` and name the repository (`owner/repo`),
+For the consult, use `--github` and name the repository (`owner/repo`),
 relevant paths, and requested branch or commit in the prompt. Explicitly ask Pro
-to use the connected GitHub app, keep the work read-only, cite retrieved files
-and the revision actually inspected, and report inaccessible evidence. Do not
+to answer the specific question. The wrapper requests the connected GitHub app,
+read-only work, citations, the revision inspected, and access gaps. Do not
 infer repository access from ChatGPT login or a successful CLI exit.
 
 Keep `--files` for local/uncommitted changes and exact snapshots. Distinguish
 uploaded evidence from GitHub evidence, and ask Pro to flag revision conflicts.
-If the app or requested revision is unavailable, use a focused file bundle and
+If the app or requested revision is unavailable, offer a new consult with a focused file bundle and
 disclose that limitation. Do not silently switch away from Pro. The CLI submits
 text; it does not select an app in the composer or handle app approval prompts.
 Until a live run demonstrates retrieval, describe this as an available setup

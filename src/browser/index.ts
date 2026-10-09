@@ -48,6 +48,7 @@ import {
 import { INPUT_SELECTORS } from "./constants.js";
 import { uploadAttachmentViaDataTransfer } from "./actions/remoteFileTransfer.js";
 import { ensureThinkingTime } from "./actions/thinkingTime.js";
+import { ensureGitHubConnection, GitHubConnectionRequiredError } from "./actions/github.js";
 import { startThinkingStatusMonitor } from "./actions/thinkingStatus.js";
 import { createAssistantContinuation } from "./actions/assistantResponse.js";
 import { createPostSubmitInputGuard } from "./actions/inputGuard.js";
@@ -450,6 +451,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     logger.sessionLog = options.log.sessionLog;
   }
   const runtimeHintCb = options.runtimeHintCb;
+  let submissionStarted = false;
   let lastTargetId: string | undefined;
   let lastUrl: string | undefined;
   const emitRuntimeHint = async (): Promise<void> => {
@@ -466,6 +468,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       conversationId,
       userDataDir,
       controllerPid: process.pid,
+      submissionStarted,
     };
     try {
       await runtimeHintCb(hint);
@@ -925,6 +928,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     );
     if (manualLogin) manualLoginRecoveryInProgress = false;
 
+    if (config.github) {
+      await raceWithDisconnect(
+        ensureGitHubConnection(Page, Runtime, logger, config.inputTimeoutMs),
+      );
+    }
+
     if (config.url !== baseUrl) {
       await raceWithDisconnect(
         navigateToPromptReadyWithFallback(Page, Runtime, {
@@ -1170,6 +1179,8 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           attachmentNames,
           afterSubmit: postSubmitInputGuard ? () => postSubmitInputGuard.enable() : undefined,
         };
+        submissionStarted = true;
+        await emitRuntimeHint();
         await raceWithDisconnect(
           runProviderSubmissionFlow(chatgptDomProvider, {
             prompt,
@@ -1612,6 +1623,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     };
   } catch (error) {
     let normalizedError = error instanceof Error ? error : new Error(String(error));
+    if (normalizedError instanceof GitHubConnectionRequiredError) {
+      preserveBrowserOnError = true;
+      await revealAuthenticatedWindow("github-connection-required");
+      await emitRuntimeHint();
+      throw normalizedError;
+    }
     if (manualLoginRecoveryInProgress && isWebSocketClosureError(normalizedError)) {
       const livePort = await readDevToolsPort(userDataDir);
       const endpoint = livePort
@@ -2259,6 +2276,8 @@ async function runRemoteBrowserMode(
   let expectedConversationUrl: string | undefined;
   let expectedConversationId: string | undefined;
   let attachedExistingTab = false;
+  let submissionStarted = false;
+  let githubSetupRequired = false;
   let ownsTarget = true;
   const runtimeHintCb = options.runtimeHintCb;
   const emitRuntimeHint = async () => {
@@ -2274,6 +2293,7 @@ async function runRemoteBrowserMode(
         tabUrl: lastUrl,
         conversationId,
         controllerPid: process.pid,
+        submissionStarted,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2435,6 +2455,12 @@ async function runRemoteBrowserMode(
       await raceWithDisconnect(ensureLoggedIn(Runtime, logger, { remoteSession: true }));
       await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));
     }
+    if (config.github) {
+      await raceWithDisconnect(
+        ensureGitHubConnection(Page, Runtime, logger, config.inputTimeoutMs),
+      );
+      await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));
+    }
     logger(
       `Prompt textarea ready (initial focus, ${promptText.length.toLocaleString()} chars queued)`,
     );
@@ -2532,6 +2558,8 @@ async function runRemoteBrowserMode(
           attachmentNames,
           afterSubmit: postSubmitInputGuard ? () => postSubmitInputGuard.enable() : undefined,
         };
+        submissionStarted = true;
+        await emitRuntimeHint();
         await runProviderSubmissionFlow(chatgptDomProvider, {
           prompt,
           evaluate: async () => undefined,
@@ -2904,6 +2932,7 @@ async function runRemoteBrowserMode(
     };
   } catch (error) {
     const normalizedError = error instanceof Error ? error : new Error(String(error));
+    githubSetupRequired = normalizedError instanceof GitHubConnectionRequiredError;
     const socketClosed = connectionClosedUnexpectedly || isWebSocketClosureError(normalizedError);
     connectionClosedUnexpectedly = connectionClosedUnexpectedly || socketClosed;
 
@@ -2936,7 +2965,7 @@ async function runRemoteBrowserMode(
       // ignore
     }
     removeDialogHandler?.();
-    if (ownsTarget) {
+    if (ownsTarget && !githubSetupRequired) {
       await closeRemoteChromeTarget(host, port, remoteTargetId ?? undefined, logger);
     }
     // Don't kill remote Chrome - it's not ours to manage

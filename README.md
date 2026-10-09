@@ -90,30 +90,35 @@ requires Temporary Chat. The [skill](skills/ask-pro/SKILL.md) has agent guidance
 
 ## Optional GitHub context
 
-You can connect GitHub to the ChatGPT account used by ask-pro. OpenAI documents
-the native [GitHub app](https://help.openai.com/en/articles/11145903-connecting-github-to-chatgpt)
-as read-only. Access depends on the account, workspace, and ChatGPT experience;
-a connection alone does not prove it works with ask-pro's selected Pro model.
+Use `--github` to check the GitHub connection in ask-pro's signed-in ChatGPT
+account before sending any prompt or files. It defaults to normal ChatGPT for
+recovery; an explicit `--temporary` still requires Temporary Chat.
 
-Before starting an ask-pro run, open ChatGPT in your usual browser with the same
-account and workspace. In **Settings > Plugins** (or **Apps**, if shown), open
-GitHub and complete its connection flow yourself. Review permissions and select
-only the repositories you want available; an organization may require approval.
-Do this separately from ask-pro's login pause, which automatically continues
-once ChatGPT sign-in succeeds.
+If GitHub is disconnected or its connection cannot be confirmed, ask-pro opens
+GitHub's ChatGPT page and returns `connect_github_then_resume`. Install the
+plugin if needed, connect your account yourself, and review repository access.
+Select only the repositories you want available; an organization may require
+approval. Then run the emitted `--resume` command. It checks the connection again
+before submitting. ChatGPT login alone does not pass this GitHub check.
 
 Then explicitly request repository evidence in the prompt:
 
 ```powershell
-ask-pro --no-temporary "Use the connected GitHub app to read owner/repo. Explain its request authentication flow, cite the files and revision you actually retrieved, and report any access gaps. Do not change anything."
+ask-pro --github "Read owner/repo and explain its request authentication flow."
 ```
 
 Use `--files` for local changes or a precise snapshot that GitHub cannot retrieve.
-ask-pro forwards the request; it does not connect the app, select an app in the
-composer, approve app actions, or verify that retrieval succeeded. Check the
-answer's evidence. The opt-in [GitHub smoke](docs/manual-tests.md#connected-github-context)
-describes how to verify the path on your account. GitHub authorization stays with
-ChatGPT; ask-pro needs no GitHub token.
+The flag requests read-only work and citations, but **does not enforce read-only
+GitHub permissions**. The live GitHub plugin advertises write capabilities;
+review the actual grant even though the [Help Center](https://help.openai.com/en/articles/11145903-connecting-github-to-chatgpt)
+describes a read-only app. [Allow read actions](https://help.openai.com/en/articles/20001495-managing-app-permissions-in-chatgpt)
+controls approval prompts, not the underlying access grant.
+
+A connected account does not prove access to a particular repository, revision,
+or Pro experience. ask-pro does not select an app in the composer, approve app
+actions, or verify the answer's sources. The opt-in [GitHub smoke](docs/manual-tests.md#connected-github-context)
+checks actual retrieval. GitHub authorization stays with ChatGPT; ask-pro needs
+no GitHub token.
 
 ## Development
 
