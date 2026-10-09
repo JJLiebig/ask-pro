@@ -1,4 +1,6 @@
 import { AssistantStoppedError } from "../../src/browser/errors.js";
+import { BrowserAutomationError } from "../../src/browser/errors.js";
+import { GitHubConnectionRequiredError } from "../../src/browser/actions/github.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -143,6 +145,77 @@ afterEach(async () => {
 });
 
 describe("ask-pro browser runner", () => {
+  test.each(["github", "login"])(
+    "resumes a GitHub request after a %s handoff before its connection check completes",
+    async (gate) => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-github-handoff-"));
+      tempDirs.push(cwd);
+      const session = await createAskProSession({
+        cwd,
+        question: "Read the public repository.",
+        filePatterns: [],
+        dryRun: false,
+        github: true,
+      });
+      const failure =
+        gate === "github"
+          ? new GitHubConnectionRequiredError("github_connection_required")
+          : new BrowserAutomationError("ChatGPT login required", { stage: "login-required" });
+      const pause = async (options: { runtimeHintCb: (hint: unknown) => Promise<void> }) => {
+        await options.runtimeHintCb({
+          chromePort: 9224,
+          chromeTargetId: "github-setup-target",
+          githubCheckPending: true,
+          tabUrl: "https://chatgpt.com/",
+        });
+        throw failure;
+      };
+      runBrowserModeMock.mockImplementationOnce(pause as never);
+      await expect(runAskProBrowserSession({ cwd, sessionId: session.id })).rejects.toThrow();
+      expect((await readAskProStatus({ cwd, sessionId: session.id })).status.status).toBe(
+        gate === "github" ? "NEEDS_GITHUB_CONNECTION" : "NEEDS_USER_AUTH",
+      );
+      runBrowserModeMock.mockImplementationOnce(pause as never);
+      await expect(resumeAskProBrowserSession({ cwd, sessionId: session.id })).rejects.toThrow();
+      expect(closeTabMock).toHaveBeenLastCalledWith(
+        9224,
+        "github-setup-target",
+        expect.any(Function),
+        "127.0.0.1",
+      );
+      runBrowserModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+        expect(args[0]).toMatchObject({ config: { github: true, url: "https://chatgpt.com/" } });
+        return {
+          answerText: "New GitHub answer",
+          answerMarkdown: "# New GitHub answer\n",
+          browserTransport: "launched",
+        };
+      });
+      await resumeAskProBrowserSession({ cwd, sessionId: session.id });
+      expect((await readAskProAnswer({ cwd, sessionId: session.id })).answer).toBe(
+        "# New GitHub answer\n",
+      );
+      expect(resumeBrowserSessionMock).not.toHaveBeenCalled();
+
+      await updateAskProStatus({ cwd, sessionId: session.id, status: "WAITING" });
+      await writeAskProBrowserMetadata({
+        cwd,
+        sessionId: session.id,
+        metadata: {
+          profileDir: testSharedProfileDir(),
+          temporary: false,
+          runtime: { chromePort: 9224, githubCheckPending: false },
+        },
+      });
+      runBrowserModeMock.mockClear();
+      closeTabMock.mockClear();
+      await resumeAskProBrowserSession({ cwd, sessionId: session.id });
+      expect(resumeBrowserSessionMock).toHaveBeenCalledTimes(1);
+      expect(runBrowserModeMock).not.toHaveBeenCalled();
+      expect(closeTabMock).not.toHaveBeenCalled();
+    },
+  );
+
   test("rejects a live same-session controller and releases the lease in finally", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-controller-live-"));
     tempDirs.push(cwd);

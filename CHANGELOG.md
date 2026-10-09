@@ -4,6 +4,10 @@
 
 ### Added
 
+- Add `--github` with a connection check before upload, human setup in the
+  managed browser, and a resumable handoff. Request read-only repository evidence
+  and citations while retaining local-file context. The flag does not restrict
+  the GitHub plugin's actual permissions.
 - Add skills CLI installation for Codex and other supported agents using the
   standalone `ask-pro` npm CLI.
 - Publish `ask-pro` to npm after each passing main-branch CI run.

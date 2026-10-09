@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_CHATGPT_BROWSER_MODEL_LABEL } from "../browser/chatgptModelCatalog.js";
 import { AssistantStoppedError, BrowserAutomationError } from "../browser/errors.js";
+import { GitHubConnectionRequiredError } from "../browser/actions/github.js";
 import {
   askProAgentIdForLegacyBrowserProfileDir,
   askProAgentIdForManagedBrowserProfileDir,
@@ -54,7 +55,7 @@ export async function runAskProBrowserSession(
 async function runAskProBrowserSessionWithLease({
   cwd,
   sessionId,
-  temporary,
+  temporary: requestedTemporary,
   chatgptUrl: chatgptUrlOverride,
   browserProfileDir,
   agentId: agentIdOverride,
@@ -64,6 +65,7 @@ async function runAskProBrowserSessionWithLease({
   const paths = getAskProSessionPaths(cwd, sessionId);
   const prompt = await readAskProPrompt({ cwd, sessionId });
   const { status: sessionStatus } = await readAskProStatus({ cwd, sessionId });
+  const temporary = requestedTemporary ?? (sessionStatus.github ? false : undefined);
   const artifactsRequested = sessionStatus.artifacts === true;
   const agentId = agentIdOverride !== undefined ? agentIdOverride : resolveAskProAgentId();
   const browserProfile = browserProfileDir ?? (await ensureAskProBrowserProfileDir(agentId));
@@ -106,6 +108,7 @@ async function runAskProBrowserSessionWithLease({
         },
       ],
       config: {
+        github: sessionStatus.github,
         url: chatgptUrl,
         manualLogin: true,
         attachRunning: false,
@@ -215,7 +218,7 @@ async function runAskProBrowserSessionWithLease({
         sessionId,
         "Temporary Chat did not expose the Pro model; retrying in normal ChatGPT.",
       );
-      await closeFallbackTemporaryTab(cwd, sessionId, logger);
+      await closeSessionBrowserTab(cwd, sessionId, logger);
       await updateAskProStatus({
         cwd,
         sessionId,
@@ -259,6 +262,17 @@ async function runAskProBrowserSessionWithLease({
         allowStartMinimized,
         verbose,
       });
+    }
+
+    if (error instanceof GitHubConnectionRequiredError) {
+      await writeTerminalBrowserMetadata(cwd, sessionId, "needs_github_connection", error.reason);
+      await updateAskProStatus({
+        cwd,
+        sessionId,
+        status: "NEEDS_GITHUB_CONNECTION",
+        reason: error.reason,
+      });
+      throw error;
     }
 
     if (isAuthGateError(error)) {
@@ -352,6 +366,22 @@ async function resumeAskProBrowserSessionWithLease({
         ? ASK_PRO_CHATGPT_URL
         : (metadata.url ?? ASK_PRO_TEMPORARY_CHATGPT_URL);
   const fallbackProfile = await resolveResumeBrowserProfile(metadata);
+  if (
+    sessionStatus.status === "NEEDS_GITHUB_CONNECTION" ||
+    (sessionStatus.github && metadata.runtime?.githubCheckPending === true)
+  ) {
+    await closeSessionBrowserTab(cwd, sessionId, logger);
+    await runAskProBrowserSessionWithLease({
+      cwd,
+      sessionId,
+      temporary: effectiveTemporary,
+      browserProfileDir: fallbackProfile,
+      agentId: metadata.agentId ?? null,
+      allowStartMinimized: false,
+      verbose,
+    });
+    return;
+  }
   let capturedFinalStatus: FinalAnswerStatus | null = null;
   if (metadata.runtime) {
     metadata.runtime = normalizeResumeRuntime(
@@ -590,7 +620,7 @@ function withNoTemporaryResumeCommand(command: string): string {
   return withoutStrictTemporary.replace(/\s--resume(?=\s|$)/, " --no-temporary --resume");
 }
 
-async function closeFallbackTemporaryTab(
+async function closeSessionBrowserTab(
   cwd: string,
   sessionId: string,
   logger: BrowserLogger,
@@ -811,7 +841,7 @@ function authFailureChromeMode(chromeMode: AskProBrowserMetadata["chromeMode"]) 
 async function writeTerminalBrowserMetadata(
   cwd: string,
   sessionId: string,
-  status: "failed" | "wait_timed_out" | "incomplete_answer",
+  status: "failed" | "wait_timed_out" | "incomplete_answer" | "needs_github_connection",
   reason: string,
 ): Promise<void> {
   const paths = getAskProSessionPaths(cwd, sessionId);
@@ -1004,6 +1034,7 @@ interface AskProBrowserMetadata {
   acceptLanguage?: string;
   chromeMode?: "launching" | "launched" | "reattaching" | "reused_devtools" | "relaunched";
   runtime?: {
+    githubCheckPending?: boolean;
     chromePid?: number;
     chromePort?: number;
     chromeHost?: string;

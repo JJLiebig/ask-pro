@@ -28,6 +28,13 @@ Read this when working on `ask_pro` from Windows and add new findings here.
   follows a replacement DevTools port recorded by the managed profile.
   Challenge recovery requires a visible active challenge control or surface;
   queued composer text and class or ID substrings do not trigger it.
+- `--github` checks the connection in the managed profile after ChatGPT login
+  and before any upload/submission. Missing or unconfirmed connections restore
+  Chrome to the GitHub setup page and return `connect_github_then_resume`.
+  The controller exits before human OAuth; resume rechecks the connection and
+  starts the unsent prompt, instead of harvesting an unrelated conversation.
+  The regular Chrome account can differ from ask-pro's account. Do not copy
+  cookies or GitHub tokens between profiles.
 - Chrome DevTools state is recorded in each session's `browser.json`; use the
   saved port for DOM inspection when a live browser needs debugging.
 - Concurrent fresh and resumed runs on one managed profile use PID-backed

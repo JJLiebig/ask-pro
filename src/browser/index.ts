@@ -48,6 +48,7 @@ import {
 import { INPUT_SELECTORS } from "./constants.js";
 import { uploadAttachmentViaDataTransfer } from "./actions/remoteFileTransfer.js";
 import { ensureThinkingTime } from "./actions/thinkingTime.js";
+import { ensureGitHubConnection, GitHubConnectionRequiredError } from "./actions/github.js";
 import { startThinkingStatusMonitor } from "./actions/thinkingStatus.js";
 import { createAssistantContinuation } from "./actions/assistantResponse.js";
 import { createPostSubmitInputGuard } from "./actions/inputGuard.js";
@@ -450,9 +451,10 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     logger.sessionLog = options.log.sessionLog;
   }
   const runtimeHintCb = options.runtimeHintCb;
+  let githubCheckPending = config.github;
   let lastTargetId: string | undefined;
   let lastUrl: string | undefined;
-  const emitRuntimeHint = async (): Promise<void> => {
+  const emitRuntimeHint = async (required = false): Promise<void> => {
     if (!runtimeHintCb || !chrome?.port) {
       return;
     }
@@ -466,10 +468,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       conversationId,
       userDataDir,
       controllerPid: process.pid,
+      githubCheckPending,
     };
     try {
       await runtimeHintCb(hint);
     } catch (error) {
+      if (required) throw error;
       const message = error instanceof Error ? error.message : String(error);
       logger(`Failed to persist runtime hint: ${message}`);
     }
@@ -727,6 +731,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           );
           client = connection.client;
           isolatedTargetId = connection.targetId ?? null;
+          lastTargetId = connection.targetId ?? undefined;
           if (!isolatedTargetId) {
             launchTargetIds = [];
           }
@@ -924,6 +929,15 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       }),
     );
     if (manualLogin) manualLoginRecoveryInProgress = false;
+
+    if (config.github) {
+      await raceWithDisconnect(
+        ensureGitHubConnection(Page, Runtime, logger, config.inputTimeoutMs),
+      );
+      githubCheckPending = false;
+      // Persist this before upload/send so a failed save cannot cause a duplicate retry.
+      await emitRuntimeHint(true);
+    }
 
     if (config.url !== baseUrl) {
       await raceWithDisconnect(
@@ -1612,6 +1626,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     };
   } catch (error) {
     let normalizedError = error instanceof Error ? error : new Error(String(error));
+    if (normalizedError instanceof GitHubConnectionRequiredError) {
+      preserveBrowserOnError = true;
+      await revealAuthenticatedWindow("github-connection-required");
+      await emitRuntimeHint();
+      throw normalizedError;
+    }
     if (manualLoginRecoveryInProgress && isWebSocketClosureError(normalizedError)) {
       const livePort = await readDevToolsPort(userDataDir);
       const endpoint = livePort
@@ -1702,6 +1722,9 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           isolatedTargetId = recovered.ownsTarget ? recovered.targetId : null;
           ownsTarget = recovered.ownsTarget;
           connectionClosedUnexpectedly = false;
+          // The restarted run owns persistence; the outer hook would save stale onboarding state.
+          removeTerminationHooks?.();
+          removeTerminationHooks = null;
           const restartedResult = await runBrowserMode(
             config.browserTabRef
               ? {
@@ -2259,9 +2282,11 @@ async function runRemoteBrowserMode(
   let expectedConversationUrl: string | undefined;
   let expectedConversationId: string | undefined;
   let attachedExistingTab = false;
+  let githubCheckPending = config.github;
+  let githubSetupRequired = false;
   let ownsTarget = true;
   const runtimeHintCb = options.runtimeHintCb;
-  const emitRuntimeHint = async () => {
+  const emitRuntimeHint = async (required = false) => {
     if (!runtimeHintCb) return;
     try {
       const conversationId = lastUrl ? extractConversationIdFromUrl(lastUrl) : undefined;
@@ -2274,8 +2299,10 @@ async function runRemoteBrowserMode(
         tabUrl: lastUrl,
         conversationId,
         controllerPid: process.pid,
+        githubCheckPending,
       });
     } catch (error) {
+      if (required) throw error;
       const message = error instanceof Error ? error.message : String(error);
       logger(`Failed to persist runtime hint: ${message}`);
     }
@@ -2433,6 +2460,14 @@ async function runRemoteBrowserMode(
     } else {
       await raceWithDisconnect(ensureNotBlocked(Runtime, config.headless, logger));
       await raceWithDisconnect(ensureLoggedIn(Runtime, logger, { remoteSession: true }));
+      await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));
+    }
+    if (config.github) {
+      await raceWithDisconnect(
+        ensureGitHubConnection(Page, Runtime, logger, config.inputTimeoutMs),
+      );
+      githubCheckPending = false;
+      await emitRuntimeHint(true);
       await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));
     }
     logger(
@@ -2904,6 +2939,7 @@ async function runRemoteBrowserMode(
     };
   } catch (error) {
     const normalizedError = error instanceof Error ? error : new Error(String(error));
+    githubSetupRequired = normalizedError instanceof GitHubConnectionRequiredError;
     const socketClosed = connectionClosedUnexpectedly || isWebSocketClosureError(normalizedError);
     connectionClosedUnexpectedly = connectionClosedUnexpectedly || socketClosed;
 
@@ -2936,7 +2972,7 @@ async function runRemoteBrowserMode(
       // ignore
     }
     removeDialogHandler?.();
-    if (ownsTarget) {
+    if (ownsTarget && !githubSetupRequired) {
       await closeRemoteChromeTarget(host, port, remoteTargetId ?? undefined, logger);
     }
     // Don't kill remote Chrome - it's not ours to manage
