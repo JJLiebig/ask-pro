@@ -356,7 +356,7 @@ describe("ask-pro cli", () => {
     );
   }, 30000);
 
-  test.each(["preamble_without_artifacts", "stopped_without_answer"])(
+  test.each(["preamble_without_artifacts", "stopped_without_answer", "questions"])(
     "harvest preserves caller recovery choice: %s",
     async (reason) => {
       const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-harvest-incomplete-"));
@@ -376,9 +376,10 @@ describe("ask-pro cli", () => {
       const sessionDir = path.join(cwd, ".ask-pro", "sessions", sessions[0]!);
       const statusPath = path.join(sessionDir, "status.json");
       const status = JSON.parse(await fs.readFile(statusPath, "utf8"));
+      const pendingStatus = reason === "questions" ? "AWAITING_ANSWERS" : "INCOMPLETE_ANSWER";
       await fs.writeFile(
         statusPath,
-        `${JSON.stringify({ ...status, status: "INCOMPLETE_ANSWER", reason }, null, 2)}\n`,
+        `${JSON.stringify({ ...status, status: pendingStatus, reason }, null, 2)}\n`,
         "utf8",
       );
       await fs.writeFile(
@@ -386,6 +387,25 @@ describe("ask-pro cli", () => {
         "I'll inspect the bundle and create the files.\n",
         "utf8",
       );
+      if (reason === "questions") {
+        await fs.writeFile(
+          path.join(sessionDir, "browser.json"),
+          JSON.stringify({
+            status: "awaiting_answers",
+            temporary: true,
+            url: "https://chatgpt.com/?temporary-chat=true",
+          }),
+        );
+        await fs.writeFile(
+          path.join(sessionDir, "QUESTIONS.json"),
+          JSON.stringify({
+            requestId: "request-1",
+            questions: [
+              { question: "Which format?", options: ["Online", "In person"], freeText: true },
+            ],
+          }),
+        );
+      }
 
       const { stdout } = await execFileAsync(
         process.execPath,
@@ -393,7 +413,7 @@ describe("ask-pro cli", () => {
         { cwd },
       );
 
-      expect(stdout).toContain("  state: incomplete_answer\n");
+      expect(stdout).toContain(`  state: ${pendingStatus.toLowerCase()}\n`);
       expect(stdout).toContain(`  reason: ${reason}\n`);
       if (reason === "stopped_without_answer") {
         expect(stdout).toContain("  action: choose_resume_or_retry\n");
@@ -402,8 +422,50 @@ describe("ask-pro cli", () => {
           "Run the original request again without --resume to start a new chat.",
         );
       }
+      if (reason === "questions") {
+        expect(stdout).toContain("  action: answer_questions\n");
+        expect(stdout).toContain('  question_1: "Which format?"');
+        expect(stdout).toContain('  options_1: "1: Online; 2: In person"');
+        expect(stdout).toContain("--answers <answers.json>");
+        expect(stdout).not.toContain("I'll inspect the bundle");
+        await fs.writeFile(
+          path.join(cwd, "answers.json"),
+          JSON.stringify({ requestId: "stale", answers: [1] }),
+        );
+        await expect(
+          execFileAsync(
+            process.execPath,
+            ["--import", tsxLoader, cli, "--resume", sessions[0]!, "--answers", "answers.json"],
+            { cwd },
+          ),
+        ).rejects.toMatchObject({ stdout: expect.stringContaining("different question request") });
+        await fs.writeFile(
+          path.join(cwd, "answers.json"),
+          JSON.stringify({ requestId: "request-1", answers: [1] }),
+        );
+        const beforeModeChange = await snapshotFiles(cwd);
+        await expect(
+          execFileAsync(
+            process.execPath,
+            [
+              "--import",
+              tsxLoader,
+              cli,
+              "--resume",
+              sessions[0]!,
+              "--answers",
+              "answers.json",
+              "--no-temporary",
+            ],
+            { cwd },
+          ),
+        ).rejects.toMatchObject({
+          stdout: expect.stringContaining("Cannot change Temporary Chat mode"),
+        });
+        expect(await snapshotFiles(cwd)).toEqual(beforeModeChange);
+      }
       const updated = JSON.parse(await fs.readFile(statusPath, "utf8"));
-      expect(updated.status).toBe("INCOMPLETE_ANSWER");
+      expect(updated.status).toBe(pendingStatus);
     },
     30000,
   );

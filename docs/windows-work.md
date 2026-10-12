@@ -77,6 +77,15 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 
 Future Windows gotchas belong here.
 
+- October 12: native clarification cards use
+  `data-codex-composer-request-navigation` and show one question at a time.
+  Pointer interaction requests a pause, but the live server returned 409
+  ("Request can no longer be snoozed") even for fresh cards. ask-pro
+  browses the cards without submitting defaults, retains Chrome, and returns
+  `AWAITING_ANSWERS`. Use a UTF-8 JSON file with `--resume ... --answers ...`;
+  this avoids PowerShell quoting problems with multiline free-text answers.
+  Expired cards are answered by replying in the same conversation.
+
 - October 7: the live Select model view exposes `GPT-6`, `GPT-5.6 Sol`, and
   `GPT-5.5` instead of `Latest`. The default picker prefers `Latest` when present,
   otherwise compares visible enabled terminal GPT versions numerically. Pro

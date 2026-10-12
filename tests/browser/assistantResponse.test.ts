@@ -7,6 +7,10 @@ import {
   waitForAssistantResponse,
 } from "../../src/browser/actions/assistantResponse.js";
 import { AssistantStoppedError } from "../../src/browser/errors.js";
+import {
+  answerAssistantQuestions,
+  buildQuestionCardsExpression,
+} from "../../src/browser/actions/questions.js";
 import { submitPrompt } from "../../src/browser/actions/promptComposer.js";
 import type { BrowserLogger, ChromeClient } from "../../src/browser/types.js";
 
@@ -21,6 +25,218 @@ afterEach(() => {
 });
 
 describe("assistant response actions", () => {
+  test("captures native search-unit replies outside the legacy main thread", () => {
+    class Element {
+      content: Element | null = null;
+      constructor(readonly innerText: string) {}
+      get textContent() {
+        return this.innerText;
+      }
+      get innerHTML() {
+        return `<p>${this.innerText}</p>`;
+      }
+      getAttribute() {
+        return null;
+      }
+      closest() {
+        return null;
+      }
+      querySelector(selector: string) {
+        return selector.includes('data-markdown-text-style="assistant-message"')
+          ? this.content
+          : null;
+      }
+      querySelectorAll() {
+        return [];
+      }
+    }
+    const turn = new Element("ChatGPT said: Blue\nCANARY_ONE_OK");
+    turn.content = new Element("Blue\nCANARY_ONE_OK");
+    const document = { querySelectorAll: () => [turn], querySelector: () => null };
+    const snapshot = new Function(
+      "document",
+      "HTMLElement",
+      `return ${buildAssistantSnapshotExpressionForTest()}`,
+    )(document, Element);
+    expect(snapshot).toMatchObject({ text: "Blue\nCANARY_ONE_OK", turnIndex: 0 });
+  });
+  test("answers expired cards in the same chat, while preserving an existing composer draft", async () => {
+    const evaluate = vi
+      .fn()
+      .mockResolvedValue({ result: { value: { questions: null, started: false } } });
+    const runtime = { evaluate } as unknown as ChromeClient["Runtime"];
+    const input = {} as ChromeClient["Input"];
+    const logger = vi.fn() as unknown as BrowserLogger;
+    const questions = [
+      { question: "Which format?", options: ["Online", "In person"], freeText: true },
+      { question: "Theme?", options: ["Engineering"], freeText: true },
+    ];
+    await answerAssistantQuestions(
+      runtime,
+      input,
+      logger,
+      [2, "Incident response\nPostmortems"],
+      questions,
+    );
+    expect(vi.mocked(submitPrompt).mock.calls[0]?.[1]).toContain(
+      "1. Which format?\nIn person\n\n2. Theme?\nIncident response\nPostmortems",
+    );
+    evaluate
+      .mockResolvedValueOnce({ result: { value: { questions: null, started: false } } })
+      .mockResolvedValueOnce({ result: { value: { activeValue: "An unsent draft" } } });
+    const submissionState = { started: false };
+    await expect(
+      answerAssistantQuestions(runtime, input, logger, [1, "Theme"], questions, submissionState),
+    ).rejects.toThrow(/composer has a draft/);
+    expect(submissionState.started).toBe(false);
+    expect(submitPrompt).toHaveBeenCalledOnce();
+    vi.mocked(submitPrompt).mockRejectedValueOnce(new Error("Disconnected during send"));
+    await expect(
+      answerAssistantQuestions(runtime, input, logger, [1, "Theme"], questions, submissionState),
+    ).rejects.toThrow(/Disconnected during send/);
+    expect(submissionState.started).toBe(true);
+    submissionState.started = false;
+    evaluate.mockRejectedValueOnce(new Error("DevTools disconnected"));
+    await expect(
+      answerAssistantQuestions(runtime, input, logger, [1, "Theme"], questions, submissionState),
+    ).rejects.toThrow(/DevTools disconnected/);
+    expect(submissionState.started).toBe(true);
+  });
+  test.each([1, 2, 3])(
+    "hands off %i native questions without defaults, then submits choices and free text",
+    async (count) => {
+      const questions = Array.from({ length: count }, (_, index) => ({
+        question: `Question ${index + 1}?`,
+        options: index === 0 ? ["Online", "In person"] : ["One hour", "Half day", "Full day"],
+        freeText: true,
+      }));
+      let index = 0;
+      let active = true;
+      let canceledCountdown = false;
+      let submitted: Array<number | string> | undefined;
+      const selections = questions.map(() => 0);
+      const texts = questions.map(() => "");
+      class DomEvent {
+        key?: string;
+        constructor(
+          readonly type: string,
+          fields: object,
+        ) {
+          Object.assign(this, fields);
+        }
+      }
+      class InputElement {}
+      class TextAreaElement {}
+      const input = {
+        focus() {},
+        get innerText() {
+          return texts[index];
+        },
+        get children() {
+          return texts[index]!.split("\n").map((text) => ({ innerText: text, textContent: text }));
+        },
+      };
+      const submit = () => {
+        submitted = questions.map((_, i) => texts[i] || selections[i]! + 1);
+        active = false;
+      };
+      const root = {
+        getBoundingClientRect: () => ({ width: 400, height: 300 }),
+        closest: () => null,
+        focus() {},
+        get innerText() {
+          return `${questions[index]!.question}\n${index + 1} of ${count}\n`;
+        },
+        querySelector(selector: string) {
+          if (selector === ".text-size-chat") return { innerText: questions[index]!.question };
+          if (selector.includes("textbox")) return input;
+          if (selector.includes("data-request-input-dismiss")) return null;
+          if (selector.includes("data-request-input-skip"))
+            return { innerText: "Submit", disabled: false, click: submit };
+          const previous = selector.includes("Previous");
+          return {
+            disabled: previous ? index === 0 : index + 1 === count,
+            click() {
+              index += previous ? -1 : 1;
+            },
+          };
+        },
+        querySelectorAll() {
+          return questions[index]!.options.map((option, choice) => ({
+            getAttribute(name: string) {
+              return name === "aria-label" ? option : String(selections[index] === choice);
+            },
+            click() {
+              selections[index] = choice;
+              if (index + 1 === count) submit();
+              else index++;
+            },
+          }));
+        },
+        dispatchEvent(event: DomEvent) {
+          if (event.type === "pointerdown") canceledCountdown = true;
+          if (event.key === "ArrowDown")
+            selections[index] = Math.min(
+              selections[index]! + 1,
+              questions[index]!.options.length - 1,
+            );
+          if (event.key === "ArrowUp") selections[index] = Math.max(selections[index]! - 1, 0);
+          if (event.key === "Enter") {
+            submitted = questions.map((_, i) => texts[i] || selections[i]! + 1);
+            active = false;
+          }
+        },
+      };
+      const document = {
+        querySelectorAll: () => (active ? [root] : []),
+        createRange: () => ({ selectNodeContents() {} }),
+        execCommand(_command: string, _show: boolean, text: string) {
+          texts[index] = text;
+        },
+      };
+      const run = async (answers?: Array<number | string>, expected = questions) => {
+        const value = await new Function(
+          "document",
+          "window",
+          "PointerEvent",
+          "KeyboardEvent",
+          "HTMLInputElement",
+          "HTMLTextAreaElement",
+          `return ${buildQuestionCardsExpression(answers, expected)}`,
+        )(
+          document,
+          { getSelection: () => null },
+          DomEvent,
+          DomEvent,
+          InputElement,
+          TextAreaElement,
+        );
+        if (answers && value.error) throw new Error(value.error);
+        return answers ? value.questions : value;
+      };
+      expect(await run()).toEqual(questions);
+      expect(canceledCountdown).toBe(true);
+      expect(submitted).toBeUndefined();
+      expect(selections).toEqual(questions.map(() => 0));
+      await expect(
+        run(
+          questions.map(() => 1),
+          [{ ...questions[0]!, question: "Old question?" }],
+        ),
+      ).rejects.toThrow(/questions changed/);
+      expect(submitted).toBeUndefined();
+      const answers =
+        count === 1
+          ? [2]
+          : count === 2
+            ? [2, "Custom theme\nwith details"]
+            : [2, 3, "Custom theme\nwith details"];
+      expect(await run(answers)).toEqual(questions);
+      expect(submitted).toEqual(answers);
+      expect(await run()).toBeNull();
+    },
+  );
+
   test("captures the full current ChatGPT answer instead of its last inline citation", () => {
     const answer = {
       innerText: "Complete answer with several paragraphs.",
@@ -389,6 +605,7 @@ describe("assistant response actions", () => {
     vi.useFakeTimers();
     const evaluate = vi
       .fn()
+      .mockResolvedValueOnce({ result: { value: null } })
       .mockResolvedValueOnce({ result: { value: null } })
       .mockResolvedValueOnce({
         result: { value: { matchedControls: 0, truncated: false, controls: [] } },

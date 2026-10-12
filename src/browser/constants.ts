@@ -38,9 +38,9 @@ export const ANSWER_SELECTORS = [
 export const CONVERSATION_TURN_SELECTOR =
   'article[data-testid^="conversation-turn"], div[data-testid^="conversation-turn"], section[data-testid^="conversation-turn"], ' +
   "article[data-message-author-role], div[data-message-author-role], section[data-message-author-role], " +
-  "article[data-turn], div[data-turn], section[data-turn]";
+  'article[data-turn], div[data-turn], section[data-turn], [data-content-search-unit-key$=":assistant"], [data-content-search-unit-key$=":user"]';
 export const ASSISTANT_ROLE_SELECTOR =
-  '[data-message-author-role="assistant"], [data-turn="assistant"]';
+  '[data-message-author-role="assistant"], [data-turn="assistant"], [data-markdown-text-style="assistant-message"]';
 export const CLOUDFLARE_TITLE = "just a moment";
 export const PROMPT_PRIMARY_SELECTOR = "#prompt-textarea";
 export const PROMPT_FALLBACK_SELECTOR = 'textarea[name="prompt-textarea"]';

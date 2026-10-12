@@ -13,6 +13,7 @@ import { buildClickDispatcher } from "./domEvents.js";
 import { AssistantStoppedError } from "../errors.js";
 import { readComposerSnapshot, submitPrompt } from "./promptComposer.js";
 import type { PostSubmitInputGuard } from "./inputGuard.js";
+import { AssistantQuestionsError, readAssistantQuestions } from "./questions.js";
 
 const ASSISTANT_POLL_TIMEOUT_ERROR = "assistant-response-watchdog-timeout";
 
@@ -97,18 +98,21 @@ export async function waitForAssistantResponse(
   const deadline = Date.now() + timeoutMs;
   while (true) {
     try {
-      return await waitForAssistantResponseOnce(
+      const answer = await waitForAssistantResponseOnce(
         Runtime,
         Math.max(1, deadline - Date.now()),
         logger,
         minTurnIndex,
         expectedConversationId,
       );
+      const questions = await readAssistantQuestions(Runtime);
+      if (questions) throw new AssistantQuestionsError(questions);
+      return answer;
     } catch (error) {
-      if (!(error instanceof AssistantStoppedError)) throw error;
       await Runtime.evaluate({
         expression: "window.__askProCancelResponseObserver?.()",
       }).catch(() => undefined);
+      if (!(error instanceof AssistantStoppedError)) throw error;
       if (!continueResponse || Date.now() >= deadline) throw error;
       minTurnIndex = await continueResponse(error.turnIndex);
     }
@@ -196,6 +200,7 @@ async function waitForAssistantResponseOnce(
         throw new Error("Timed out waiting for assistant response");
       } else if (source === "poll") {
         pollerAbort.abort();
+        evaluationPromise.catch(() => undefined);
         throw error;
       } else if (source === "evaluation") {
         const recovered = await recoverAssistantResponse(
@@ -520,6 +525,8 @@ async function pollAssistantCompletion(
     if (abortSignal?.aborted) {
       return null;
     }
+    const questions = await readAssistantQuestions(Runtime);
+    if (questions) throw new AssistantQuestionsError(questions);
     const snapshot = await readAssistantSnapshot(Runtime, minTurnIndex, expectedConversationId);
     const normalized = normalizeAssistantSnapshot(snapshot);
     if (normalized) {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { resumeBrowserSession } from "../../src/browser/reattach.js";
 import { AssistantStoppedError } from "../../src/browser/errors.js";
+import { AssistantQuestionsError } from "../../src/browser/actions/questions.js";
 import {
   buildConversationUrl,
   extractConversationIdFromUrl,
@@ -46,9 +47,16 @@ describe("reattach browser lease", () => {
     ).toBeNull();
     expect(extractConversationIdFromUrl(saved)).toBe("795d079e-6c4d-4334-b0ae-4534c70305bd");
   });
-  test("returns an exhausted continuation to the caller instead of relaunching", async () => {
+  test.each([
+    new AssistantStoppedError(3),
+    new AssistantQuestionsError([{ question: "Which color?", options: ["Blue"], freeText: true }]),
+  ])("returns $name to the caller and closes its connection without relaunching", async (error) => {
     const recoverSession = vi.fn();
+    let connected = true;
     const client = {
+      close: async () => {
+        connected = false;
+      },
       Runtime: {
         evaluate: async ({ expression }: { expression: string }) => ({
           result: { value: expression === "location.href" ? "https://chatgpt.com/c/test" : 2 },
@@ -67,27 +75,29 @@ describe("reattach browser lease", () => {
           ],
           connect: async () => client,
           waitForAssistantResponse: async () => {
-            throw new AssistantStoppedError(3);
+            throw error;
           },
           recoverSession,
         },
       ),
-    ).rejects.toBeInstanceOf(AssistantStoppedError);
+    ).rejects.toBe(error);
+    expect(connected).toBe(false);
     expect(recoverSession).not.toHaveBeenCalled();
   });
 
-  test("releases its lease before falling back after an attach failure", async () => {
-    const profileDir = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-lease-"));
-    tempDirs.push(profileDir);
-    const recovered = {
-      answerText: "recovered",
-      answerMarkdown: "recovered",
-      chromeMode: "relaunched" as const,
-    };
-    const recoverSession = vi.fn().mockResolvedValue(recovered);
+  test.each(["ordinary", "pending answers", "uncertain submission"])(
+    "releases its lease after an attach failure: %s",
+    async (mode) => {
+      const profileDir = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-lease-"));
+      tempDirs.push(profileDir);
+      const recovered = {
+        answerText: "recovered",
+        answerMarkdown: "recovered",
+        chromeMode: "relaunched" as const,
+      };
+      const recoverSession = vi.fn().mockResolvedValue(recovered);
 
-    await expect(
-      resumeBrowserSession(
+      const result = resumeBrowserSession(
         { chromePort: 9222, userDataDir: profileDir },
         {
           manualLogin: true,
@@ -100,11 +110,21 @@ describe("reattach browser lease", () => {
             throw new Error("attach failed");
           },
           recoverSession,
+          questionAnswers:
+            mode === "ordinary"
+              ? undefined
+              : {
+                  answers: [1],
+                  questions: [{ question: "Color?", options: ["Blue"], freeText: true }],
+                  submissionState: { started: mode === "uncertain submission" },
+                },
         },
-      ),
-    ).resolves.toEqual(recovered);
+      );
+      if (mode === "uncertain submission") await expect(result).rejects.toThrow("attach failed");
+      else await expect(result).resolves.toEqual(recovered);
 
-    expect(recoverSession).toHaveBeenCalledOnce();
-    await expect(fs.readdir(path.join(profileDir, "ask-pro-browser-runs"))).resolves.toEqual([]);
-  });
+      expect(recoverSession).toHaveBeenCalledTimes(mode === "uncertain submission" ? 0 : 1);
+      await expect(fs.readdir(path.join(profileDir, "ask-pro-browser-runs"))).resolves.toEqual([]);
+    },
+  );
 });

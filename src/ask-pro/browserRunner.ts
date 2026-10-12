@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_CHATGPT_BROWSER_MODEL_LABEL } from "../browser/chatgptModelCatalog.js";
 import { AssistantStoppedError, BrowserAutomationError } from "../browser/errors.js";
+import { AssistantQuestionsError } from "../browser/actions/questions.js";
+import { readAskProQuestions, parseQuestionAnswers, writeAskProQuestions } from "./questions.js";
 import { GitHubConnectionRequiredError } from "../browser/actions/github.js";
 import {
   askProAgentIdForLegacyBrowserProfileDir,
@@ -43,6 +45,7 @@ export interface RunAskProBrowserSessionOptions {
   agentId?: string | null;
   allowStartMinimized?: boolean;
   verbose?: boolean;
+  answers?: string;
 }
 
 export async function runAskProBrowserSession(
@@ -302,6 +305,12 @@ async function runAskProBrowserSessionWithLease({
       throw new AskProNeedsAuthError(sessionId, browserProfile, classifyBrowserError(error));
     }
 
+    if (error instanceof AssistantQuestionsError) {
+      await writeAskProQuestions(paths.dir, error.questions);
+      await writeTerminalBrowserMetadata(cwd, sessionId, "awaiting_answers", "questions");
+      await updateAskProStatus({ cwd, sessionId, status: "AWAITING_ANSWERS", reason: "questions" });
+      throw error;
+    }
     if (error instanceof AssistantStoppedError) {
       await writeTerminalBrowserMetadata(
         cwd,
@@ -351,13 +360,36 @@ async function resumeAskProBrowserSessionWithLease({
   sessionId,
   temporary,
   verbose,
+  answers,
 }: RunAskProBrowserSessionOptions): Promise<void> {
   const paths = getAskProSessionPaths(cwd, sessionId);
   const prompt = await readAskProPrompt({ cwd, sessionId });
   const { status: sessionStatus } = await readAskProStatus({ cwd, sessionId });
+  const request = answers !== undefined ? await readAskProQuestions(paths.dir) : undefined;
+  if (answers !== undefined && sessionStatus.status !== "AWAITING_ANSWERS")
+    throw new Error(
+      "This session is not waiting for answers. Resume without --answers to inspect it.",
+    );
+  const questionAnswers =
+    request && answers !== undefined
+      ? {
+          questions: request.questions,
+          answers: parseQuestionAnswers(answers, request),
+          submissionState: { started: false },
+        }
+      : undefined;
   const artifactsRequested = sessionStatus.artifacts === true;
   const logger = buildAskProBrowserLogger(cwd, sessionId, verbose);
   const metadata = await readBrowserMetadata(paths.browser);
+  if (
+    questionAnswers &&
+    temporary !== undefined &&
+    temporary !== (metadata.temporary ?? isTemporaryAskProUrl(metadata.url ?? ""))
+  ) {
+    throw new Error(
+      "Cannot change Temporary Chat mode while answering questions; resume with the saved mode.",
+    );
+  }
   const effectiveTemporary = temporary ?? metadata.temporary;
   const chatgptUrl =
     effectiveTemporary === true
@@ -468,6 +500,10 @@ async function resumeAskProBrowserSessionWithLease({
       },
       logger,
       {
+        questionAnswers,
+        afterQuestionsAnswered: async () => {
+          await fs.rm(path.join(paths.dir, "QUESTIONS.json"), { force: true });
+        },
         promptPreview: prompt,
         chromeModeCb: async (chromeMode) => {
           const current = await readBrowserMetadata(paths.browser).catch(() => metadata);
@@ -565,6 +601,12 @@ async function resumeAskProBrowserSessionWithLease({
       });
       throw new AskProNeedsAuthError(sessionId, fallbackProfile, classifyBrowserError(error));
     }
+    if (error instanceof AssistantQuestionsError) {
+      await writeAskProQuestions(paths.dir, error.questions);
+      await writeTerminalBrowserMetadata(cwd, sessionId, "awaiting_answers", "questions");
+      await updateAskProStatus({ cwd, sessionId, status: "AWAITING_ANSWERS", reason: "questions" });
+      throw error;
+    }
     if (error instanceof AssistantStoppedError) {
       await writeTerminalBrowserMetadata(
         cwd,
@@ -591,11 +633,17 @@ async function resumeAskProBrowserSessionWithLease({
       throw error;
     }
     const reason = error instanceof Error ? error.message : String(error);
-    await writeTerminalBrowserMetadata(cwd, sessionId, "failed", reason);
+    const answersPending = questionAnswers && !questionAnswers.submissionState.started;
+    await writeTerminalBrowserMetadata(
+      cwd,
+      sessionId,
+      answersPending ? "awaiting_answers" : questionAnswers ? "wait_timed_out" : "failed",
+      reason,
+    );
     await updateAskProStatus({
       cwd,
       sessionId,
-      status: "FAILED",
+      status: answersPending ? "AWAITING_ANSWERS" : questionAnswers ? "WAIT_TIMED_OUT" : "FAILED",
       reason,
     });
     throw error;
@@ -841,7 +889,12 @@ function authFailureChromeMode(chromeMode: AskProBrowserMetadata["chromeMode"]) 
 async function writeTerminalBrowserMetadata(
   cwd: string,
   sessionId: string,
-  status: "failed" | "wait_timed_out" | "incomplete_answer" | "needs_github_connection",
+  status:
+    | "failed"
+    | "wait_timed_out"
+    | "incomplete_answer"
+    | "needs_github_connection"
+    | "awaiting_answers",
   reason: string,
 ): Promise<void> {
   const paths = getAskProSessionPaths(cwd, sessionId);

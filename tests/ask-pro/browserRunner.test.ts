@@ -1,4 +1,6 @@
 import { AssistantStoppedError } from "../../src/browser/errors.js";
+import { AssistantQuestionsError } from "../../src/browser/actions/questions.js";
+import { readAskProQuestions, parseQuestionAnswers } from "../../src/ask-pro/questions.js";
 import { BrowserAutomationError } from "../../src/browser/errors.js";
 import { GitHubConnectionRequiredError } from "../../src/browser/actions/github.js";
 import fs from "node:fs/promises";
@@ -938,6 +940,13 @@ describe("ask-pro browser runner", () => {
 
   test.each([
     {
+      error: new AssistantQuestionsError([
+        { question: "Which format?", options: ["Online", "In person"], freeText: true },
+      ]),
+      status: "awaiting_answers",
+      reason: "questions",
+    },
+    {
       error: new Error("assistant response timed out"),
       status: "wait_timed_out",
       reason: "assistant_timeout",
@@ -976,10 +985,29 @@ describe("ask-pro browser runner", () => {
     const { status } = await readAskProStatus({ cwd, sessionId: session.id });
     expect(status).toMatchObject({ status: failure.status.toUpperCase(), reason: failure.reason });
     expect(metadata).toMatchObject({
-      status: failure.status,
+      status: failure.status.toLowerCase(),
       chromeMode: "launched",
       reason: failure.reason,
     });
+    if (failure.error instanceof AssistantQuestionsError) {
+      const request = await readAskProQuestions(session.dir);
+      const answers = JSON.stringify({ requestId: request.requestId, answers: [2] });
+      await expect(
+        resumeAskProBrowserSession({ cwd, sessionId: session.id, answers, temporary: false }),
+      ).rejects.toThrow(/Cannot change Temporary Chat mode/);
+      resumeBrowserSessionMock.mockRejectedValueOnce(new Error("The composer has a draft"));
+      await expect(
+        resumeAskProBrowserSession({ cwd, sessionId: session.id, answers }),
+      ).rejects.toThrow(/composer has a draft/);
+      expect((await readAskProStatus({ cwd, sessionId: session.id })).status.status).toBe(
+        "AWAITING_ANSWERS",
+      );
+      expect(await readAskProQuestions(session.dir)).toEqual(request);
+      await resumeAskProBrowserSession({ cwd, sessionId: session.id, answers });
+      expect((await readAskProStatus({ cwd, sessionId: session.id })).status.status).toBe(
+        "COMPLETED",
+      );
+    }
   });
 
   test("preserves launched Chrome mode for post-launch failures", async () => {
@@ -1577,6 +1605,13 @@ describe("ask-pro browser runner", () => {
       status: "INCOMPLETE_ANSWER",
       reason: "stopped_without_answer",
     },
+    {
+      error: new AssistantQuestionsError([
+        { question: "Which format?", options: ["Online", "In person"], freeText: true },
+      ]),
+      status: "AWAITING_ANSWERS",
+      reason: "questions",
+    },
   ])("reattach failure remains resumable: $reason", async (failure) => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-timeout-"));
     tempDirs.push(cwd);
@@ -1610,6 +1645,37 @@ describe("ask-pro browser runner", () => {
 
     const { status } = await readAskProStatus({ cwd, sessionId: session.id });
     expect(status.status).toBe(failure.status);
+    if (failure.error instanceof AssistantQuestionsError) {
+      const request = await readAskProQuestions(session.dir);
+      expect(request.questions).toEqual(failure.error.questions);
+      expect(
+        parseQuestionAnswers(
+          JSON.stringify({ requestId: request.requestId, answers: [2], extra: true }),
+          request,
+        ),
+      ).toEqual([2]);
+      expect(
+        parseQuestionAnswers(
+          JSON.stringify({ requestId: request.requestId, answers: ["A custom format"] }),
+          request,
+        ),
+      ).toEqual(["A custom format"]);
+      expect(() =>
+        parseQuestionAnswers(JSON.stringify({ requestId: "stale", answers: [1] }), request),
+      ).toThrow(/different question request/);
+      expect(() =>
+        parseQuestionAnswers(
+          JSON.stringify({ requestId: request.requestId, answers: [3] }),
+          request,
+        ),
+      ).toThrow(/Question 1/);
+      expect(() =>
+        parseQuestionAnswers(
+          JSON.stringify({ requestId: request.requestId, answers: [] }),
+          request,
+        ),
+      ).toThrow(/one answer per question/);
+    }
     const metadata = JSON.parse(
       await fs.readFile(path.join(session.dir, "browser.json"), "utf8"),
     ) as { status?: string; chromeMode?: string; reason?: string };

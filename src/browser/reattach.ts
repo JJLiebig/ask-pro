@@ -1,4 +1,9 @@
 import { AssistantStoppedError } from "./errors.js";
+import {
+  AssistantQuestionsError,
+  answerAssistantQuestions,
+  type AssistantQuestion,
+} from "./actions/questions.js";
 import { createAssistantContinuation } from "./actions/assistantResponse.js";
 import CDP from "chrome-remote-interface";
 import type { LaunchedChrome } from "chrome-launcher";
@@ -67,6 +72,12 @@ import {
 
 type BrowserSessionConfig = BrowserAutomationConfig;
 export interface ReattachDeps {
+  questionAnswers?: {
+    answers: Array<number | string>;
+    questions: AssistantQuestion[];
+    submissionState: { started: boolean };
+  };
+  afterQuestionsAnswered?: () => Promise<void>;
   continuationState?: { used: boolean };
   listTargets?: () => Promise<TargetInfoLite[]>;
   connect?: (options?: unknown) => Promise<ChromeClient>;
@@ -220,6 +231,7 @@ export async function resumeBrowserSession(
     ? await acquireReattachRunLease(directUserDataDir, resolvedConfig.profileLockTimeoutMs, logger)
     : null;
   let closeConnection: (() => Promise<void>) | null = null;
+  let answeringQuestions = false;
 
   try {
     const liveRuntime = await refreshAttachRuntime(runtime, logger).catch(() => runtime);
@@ -266,7 +278,8 @@ export async function resumeBrowserSession(
             )) as unknown as ChromeClient,
             close: async () => undefined,
           } as const);
-    closeConnection = connection.close;
+    closeConnection =
+      browserWSEndpoint && !deps.connect ? connection.close : () => connection.client.close();
     const connectedTargetId = "targetId" in connection ? connection.targetId : target?.targetId;
     const ownsConnectedTarget = Boolean(
       !resolvedConfig.browserTabRef &&
@@ -341,6 +354,18 @@ export async function resumeBrowserSession(
     );
     await ensureConversationOpen();
     const minTurnIndex = await readConversationTurnIndex(Runtime, logger);
+    if (deps.questionAnswers) {
+      answeringQuestions = true;
+      await answerAssistantQuestions(
+        Runtime,
+        Input,
+        logger,
+        deps.questionAnswers.answers,
+        deps.questionAnswers.questions,
+        deps.questionAnswers.submissionState,
+      );
+      await deps.afterQuestionsAnswered?.();
+    }
     const promptEcho = buildPromptEchoMatcher(deps.promptPreview);
     const answer = await withTimeout(
       waitForResponse(
@@ -379,7 +404,7 @@ export async function resumeBrowserSession(
       },
     });
 
-    await connection.close().catch(() => undefined);
+    await closeConnection().catch(() => undefined);
     closeConnection = null;
     const keepBrowserOpen = Boolean(
       resolvedConfig.keepBrowser ||
@@ -419,7 +444,13 @@ export async function resumeBrowserSession(
     await closeConnection?.().catch(() => undefined);
     await releaseReattachRunLease(reattachRunLease, logger);
     reattachRunLease = null;
-    if (error instanceof AssistantStoppedError) throw error;
+    if (
+      error instanceof AssistantStoppedError ||
+      error instanceof AssistantQuestionsError ||
+      answeringQuestions ||
+      deps.questionAnswers?.submissionState.started
+    )
+      throw error;
     const message = error instanceof Error ? error.message : String(error);
     logger(
       `Existing Chrome reattach failed (${message}); reopening browser to locate the session.`,
@@ -666,6 +697,17 @@ async function resumeBrowserSessionViaNewChrome(
     const captureMarkdown = deps.captureAssistantMarkdown ?? captureAssistantMarkdown;
     const timeoutMs = resolved.timeoutMs ?? 120_000;
     const minTurnIndex = await readConversationTurnIndex(Runtime, logger);
+    if (deps.questionAnswers) {
+      await answerAssistantQuestions(
+        Runtime,
+        client.Input,
+        logger,
+        deps.questionAnswers.answers,
+        deps.questionAnswers.questions,
+        deps.questionAnswers.submissionState,
+      );
+      await deps.afterQuestionsAnswered?.();
+    }
     const promptEcho = buildPromptEchoMatcher(deps.promptPreview);
     const answer = await waitForResponse(
       Runtime,

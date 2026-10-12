@@ -88,6 +88,27 @@ Use `ask-pro --help` for the full CLI. For multiline prompts, use
 `--prompt-file`. Prefer `--no-temporary` when recovery matters; `--temporary`
 requires Temporary Chat. The [skill](skills/ask-pro/SKILL.md) has agent guidance.
 
+When Pro asks native questions, ask-pro returns `awaiting_answers`, prints each
+question and its numbered choices, and saves `QUESTIONS.json`. The calling agent
+can answer directly, or ask its user when a decision needs their input. Write a
+UTF-8 JSON file using the emitted `request_id`, with one answer per question:
+
+```json
+{ "requestId": "<request_id>", "answers": [2, 3, "A workshop on incident response"] }
+```
+
+Numbers select 1-based options; strings enter free text. Then continue the same chat:
+
+```powershell
+ask-pro --resume <session-id> --answers answers.json
+```
+
+`--answers -` accepts piped JSON. ask-pro requests a native pause; if ChatGPT expires
+the cards anyway, it sends your answers as a reply in the same conversation.
+Keep the session's original Temporary Chat mode when answering.
+Further question rounds use the same
+flow; `--status` repeats pending questions and `--harvest` waits for a final answer.
+
 ## Optional GitHub context
 
 Use `--github` to check the GitHub connection in ask-pro's signed-in ChatGPT

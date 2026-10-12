@@ -162,6 +162,16 @@ Normal `ask-pro` stdout is compact TOON-style telemetry. Use `state`, `action`,
 `resume`, and `harvest` to decide the next command. Browser progress may appear
 on stderr and can be ignored unless diagnosing a stuck run.
 
+`AWAITING_ANSWERS` / `answer_questions` means Pro is asking native interactive
+questions. Read the printed questions/options or `QUESTIONS.json`, answer from
+the caller's context, and ask the human only for decisions you cannot infer.
+Write UTF-8 JSON `{"requestId":"<request_id>","answers":[2,3,"free text"]}`
+with one answer per question in order, then run the emitted
+`ask-pro --resume <session-id> --answers <answers.json>` command. Numbers select
+1-based choices; strings enter the native free-text field. `--answers -` accepts
+piped JSON. Do not submit defaults or treat the question preamble as the answer.
+Repeat for further question rounds, then harvest the final answer normally.
+
 When present, use `profile`, `profile_path`, `chrome`, and `language` only as
 diagnostic hints. They tell you whether the run used the shared profile, an
 isolated agent profile, saved DevTools state, and English browser steering.

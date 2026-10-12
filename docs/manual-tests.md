@@ -4,6 +4,17 @@ These checks exercise the real ChatGPT browser path. They are opt-in because
 they open Chrome, use the signed-in ChatGPT account, and can take several
 minutes or longer for Pro thinking.
 
+## Native questions canary
+
+Ask Pro to use its `ask-user-input` skill for three native cards: two choices,
+three choices, and a question whose Other field accepts free text, then wait and
+summarize the answers. The October 12 tool rejects questions with zero options.
+Verify `awaiting_answers` prints all cards, no answer is harvested, and the cards
+can still be answered after their original countdown. Reply with `--resume <id>
+--answers answers.json` using `{"requestId":"<request_id>","answers":[2,3,"custom theme"]}`.
+Verify the final answer preserves all selections and custom text. Repeat with
+one and two cards, and verify a stale request ID is rejected before submission.
+
 ## Prerequisites
 
 - Node 24+.
