@@ -33,6 +33,9 @@ export function parseQuestionAnswers(
   request: AskProQuestions,
 ): Array<number | string> {
   const value = JSON.parse(raw);
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Answers must be a JSON object with requestId and answers.");
+  }
   if (value?.requestId !== request.requestId)
     throw new Error(
       "Answers belong to a different question request; read the current QUESTIONS.json.",

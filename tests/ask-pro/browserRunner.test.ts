@@ -1648,6 +1648,9 @@ describe("ask-pro browser runner", () => {
     if (failure.error instanceof AssistantQuestionsError) {
       const request = await readAskProQuestions(session.dir);
       expect(request.questions).toEqual(failure.error.questions);
+      for (const value of [null, [], 1, "answer"]) {
+        expect(() => parseQuestionAnswers(JSON.stringify(value), request)).toThrow(/JSON object/);
+      }
       expect(
         parseQuestionAnswers(
           JSON.stringify({ requestId: request.requestId, answers: [2], extra: true }),

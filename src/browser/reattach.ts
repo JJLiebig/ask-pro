@@ -353,10 +353,10 @@ export async function resumeBrowserSession(
       "Reattach target did not respond",
     );
     await ensureConversationOpen();
-    const minTurnIndex = await readConversationTurnIndex(Runtime, logger);
+    let minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     if (deps.questionAnswers) {
       answeringQuestions = true;
-      await answerAssistantQuestions(
+      const replyBoundary = await answerAssistantQuestions(
         Runtime,
         Input,
         logger,
@@ -364,6 +364,7 @@ export async function resumeBrowserSession(
         deps.questionAnswers.questions,
         deps.questionAnswers.submissionState,
       );
+      if (replyBoundary !== undefined) minTurnIndex = replyBoundary;
       await deps.afterQuestionsAnswered?.();
     }
     const promptEcho = buildPromptEchoMatcher(deps.promptPreview);
@@ -696,9 +697,9 @@ async function resumeBrowserSessionViaNewChrome(
     const waitForResponse = deps.waitForAssistantResponse ?? waitForAssistantResponse;
     const captureMarkdown = deps.captureAssistantMarkdown ?? captureAssistantMarkdown;
     const timeoutMs = resolved.timeoutMs ?? 120_000;
-    const minTurnIndex = await readConversationTurnIndex(Runtime, logger);
+    let minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     if (deps.questionAnswers) {
-      await answerAssistantQuestions(
+      const replyBoundary = await answerAssistantQuestions(
         Runtime,
         client.Input,
         logger,
@@ -706,6 +707,7 @@ async function resumeBrowserSessionViaNewChrome(
         deps.questionAnswers.questions,
         deps.questionAnswers.submissionState,
       );
+      if (replyBoundary !== undefined) minTurnIndex = replyBoundary;
       await deps.afterQuestionsAnswered?.();
     }
     const promptEcho = buildPromptEchoMatcher(deps.promptPreview);

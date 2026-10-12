@@ -61,9 +61,9 @@ describe("assistant response actions", () => {
     expect(snapshot).toMatchObject({ text: "Blue\nCANARY_ONE_OK", turnIndex: 0 });
   });
   test("answers expired cards in the same chat, while preserving an existing composer draft", async () => {
-    const evaluate = vi
-      .fn()
-      .mockResolvedValue({ result: { value: { questions: null, started: false } } });
+    const evaluate = vi.fn().mockImplementation(async ({ expression }: { expression: string }) => ({
+      result: { value: expression.endsWith(".length") ? 2 : { questions: null, started: false } },
+    }));
     const runtime = { evaluate } as unknown as ChromeClient["Runtime"];
     const input = {} as ChromeClient["Input"];
     const logger = vi.fn() as unknown as BrowserLogger;
@@ -90,7 +90,10 @@ describe("assistant response actions", () => {
     ).rejects.toThrow(/composer has a draft/);
     expect(submissionState.started).toBe(false);
     expect(submitPrompt).toHaveBeenCalledOnce();
-    vi.mocked(submitPrompt).mockRejectedValueOnce(new Error("Disconnected during send"));
+    vi.mocked(submitPrompt).mockImplementationOnce(async (deps) => {
+      deps.submissionState!.started = true;
+      throw new Error("Disconnected during send");
+    });
     await expect(
       answerAssistantQuestions(runtime, input, logger, [1, "Theme"], questions, submissionState),
     ).rejects.toThrow(/Disconnected during send/);

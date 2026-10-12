@@ -18,6 +18,9 @@
 
 ### Fixed
 
+- Wait for the new reply when answering expired question cards, and keep
+  answers retryable when the composer rejects input before sending.
+
 - Capture replies in ChatGPT's current search-unit message layout and close
   the controller's DevTools connection when a resumed session hands off questions.
 

@@ -84,7 +84,9 @@ Future Windows gotchas belong here.
   browses the cards without submitting defaults, retains Chrome, and returns
   `AWAITING_ANSWERS`. Use a UTF-8 JSON file with `--resume ... --answers ...`;
   this avoids PowerShell quoting problems with multiline free-text answers.
-  Expired cards are answered by replying in the same conversation.
+  Expired cards are answered by replying in the same conversation; capture waits
+  for that new reply. A composer that rejects input before sending leaves answers
+  pending for retry.
 
 - October 7: the live Select model view exposes `GPT-6`, `GPT-5.6 Sol`, and
   `GPT-5.5` instead of `Latest`. The default picker prefers `Latest` when present,

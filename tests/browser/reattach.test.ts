@@ -5,6 +5,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { resumeBrowserSession } from "../../src/browser/reattach.js";
 import { AssistantStoppedError } from "../../src/browser/errors.js";
 import { AssistantQuestionsError } from "../../src/browser/actions/questions.js";
+import { readAssistantSnapshot } from "../../src/browser/actions/assistantResponse.js";
+import { submitPrompt } from "../../src/browser/actions/promptComposer.js";
 import {
   buildConversationUrl,
   extractConversationIdFromUrl,
@@ -12,12 +14,76 @@ import {
 import type { ChromeClient } from "../../src/browser/types.js";
 
 const tempDirs: string[] = [];
+vi.mock("../../src/browser/actions/promptComposer.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/browser/actions/promptComposer.js")>()),
+  submitPrompt: vi.fn(),
+}));
 
 afterEach(async () => {
+  vi.clearAllMocks();
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
 describe("reattach browser lease", () => {
+  test.each(["native", "expired"])(
+    "captures the answer after %s questions are submitted",
+    async (mode) => {
+      const questions = [{ question: "Color?", options: ["Blue"], freeText: true }];
+      let turns = 2;
+      let snapshot = { text: "Previous reply", turnIndex: 1 };
+      const client = {
+        close: vi.fn().mockResolvedValue(undefined),
+        Input: {},
+        Runtime: {
+          evaluate: async ({ expression }: { expression: string }) => ({
+            result: {
+              value:
+                expression === "location.href"
+                  ? "https://chatgpt.com/c/test"
+                  : expression.endsWith(".length")
+                    ? turns
+                    : expression.includes("const MIN_TURN_INDEX")
+                      ? snapshot
+                      : expression.includes("const submission =")
+                        ? {
+                            questions: mode === "native" ? questions : null,
+                            started: mode === "native",
+                          }
+                        : 2,
+            },
+          }),
+        },
+      } as unknown as ChromeClient;
+      // Sending commits a new user turn before the next assistant turn appears.
+      vi.mocked(submitPrompt).mockImplementationOnce(async () => {
+        turns = 3;
+        return turns;
+      });
+      const result = await resumeBrowserSession(
+        { chromePort: 9222, conversationId: "test" },
+        {},
+        vi.fn<(message: string) => void>(),
+        {
+          listTargets: async () => [
+            { targetId: "test", type: "page", url: "https://chatgpt.com/c/test" },
+          ],
+          connect: async () => client,
+          questionAnswers: { answers: [1], questions, submissionState: { started: false } },
+          waitForAssistantResponse: async (runtime, _timeout, _logger, minTurnIndex) => {
+            if (mode === "expired")
+              expect(await readAssistantSnapshot(runtime, minTurnIndex)).toBeNull();
+            snapshot = { text: "Fresh answer: Blue", turnIndex: mode === "native" ? 1 : 3 };
+            const answer = await readAssistantSnapshot(runtime, minTurnIndex);
+            expect(answer?.text).toBe("Fresh answer: Blue");
+            return { text: answer!.text!, meta: {} };
+          },
+          captureAssistantMarkdown: async () => null,
+        },
+      );
+      expect(result.answerText).toBe("Fresh answer: Blue");
+      expect(client.close).toHaveBeenCalledOnce();
+    },
+  );
   test("discards a stored provisional route before recovering an interrupted session", async () => {
     const recoverSession = vi.fn().mockResolvedValue({
       answerText: "Recovered answer",

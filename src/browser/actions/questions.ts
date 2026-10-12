@@ -1,6 +1,7 @@
 import type { ChromeClient } from "../types.js";
 import type { BrowserLogger } from "../types.js";
 import { readComposerSnapshot, submitPrompt } from "./promptComposer.js";
+import { CONVERSATION_TURN_SELECTOR } from "../constants.js";
 
 export interface AssistantQuestion {
   question: string;
@@ -214,7 +215,16 @@ export async function answerAssistantQuestions(
         "The ChatGPT composer has a draft; clear it before answering expired questions.",
       );
     const prompt = `Answers to your clarification questions:\n\n${expected.map((question, index) => `${index + 1}. ${question.question}\n${typeof answers[index] === "number" ? question.options[(answers[index] as number) - 1] : answers[index]}`).join("\n\n")}\n\nContinue the original request using these answers.`;
-    submissionState.started = true;
-    await submitPrompt({ runtime: Runtime, input: Input }, prompt, logger);
+    const { result } = await Runtime.evaluate({
+      expression: `document.querySelectorAll(${JSON.stringify(CONVERSATION_TURN_SELECTOR)}).length`,
+      returnByValue: true,
+    });
+    const baselineTurns = result.value as number;
+    await submitPrompt(
+      { runtime: Runtime, input: Input, baselineTurns, submissionState },
+      prompt,
+      logger,
+    );
+    return baselineTurns;
   }
 }

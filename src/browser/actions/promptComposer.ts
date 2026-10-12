@@ -277,6 +277,7 @@ export async function submitPrompt(
     baselineTurns?: number | null;
     inputTimeoutMs?: number | null;
     afterSubmit?: () => Promise<void>;
+    submissionState?: { started: boolean };
   },
   prompt: string,
   logger: BrowserLogger,
@@ -417,6 +418,7 @@ export async function submitPrompt(
     logger,
     deps?.attachmentNames,
     deps.inputTimeoutMs ?? undefined,
+    deps.submissionState,
   );
   if (!clicked) {
     const canSubmitViaEnter = await canSubmitPromptViaEnter(runtime);
@@ -430,6 +432,7 @@ export async function submitPrompt(
         },
       );
     }
+    if (deps.submissionState) deps.submissionState.started = true;
     await input.dispatchKeyEvent({
       type: "keyDown",
       ...ENTER_KEY_EVENT,
@@ -668,6 +671,7 @@ async function attemptSendButton(
   logger?: BrowserLogger,
   attachmentNames?: string[],
   inputTimeoutMs?: number,
+  submissionState?: { started: boolean },
 ): Promise<boolean> {
   const needAttachment = Array.isArray(attachmentNames) && attachmentNames.length > 0;
   const deadline =
@@ -707,6 +711,7 @@ async function attemptSendButton(
         continue;
       }
     }
+    if (submissionState) submissionState.started = true;
     const { result } = await Runtime.evaluate({
       expression: buildComposerSendClickExpression(),
       returnByValue: true,
@@ -714,6 +719,7 @@ async function attemptSendButton(
     if (result.value === "clicked") {
       return true;
     }
+    if (submissionState) submissionState.started = false;
     if (result.value === "stop-button") {
       throw new BrowserAutomationError("Refusing to click ChatGPT stop control as a send button.", {
         stage: "submit-prompt",
