@@ -4,6 +4,10 @@
 
 ### Added
 
+- Hand native ChatGPT clarification questions to the calling agent, including
+  numbered choices and free text. Resume with `--answers` to answer in the same
+  conversation, including recovery when the provider expires its question cards.
+
 - Add `--github` with a connection check before upload, human setup in the
   managed browser, and a resumable handoff. Request read-only repository evidence
   and citations while retaining local-file context. The flag does not restrict
@@ -13,6 +17,12 @@
 - Publish `ask-pro` to npm after each passing main-branch CI run.
 
 ### Fixed
+
+- Wait for the new reply when answering expired question cards, and keep
+  answers retryable when the composer rejects input before sending.
+
+- Capture replies in ChatGPT's current search-unit message layout and close
+  the controller's DevTools connection when a resumed session hands off questions.
 
 - Prefer ChatGPT's `Latest` model when available, otherwise select the highest
   numbered available GPT model and confirm `Pro` intelligence.

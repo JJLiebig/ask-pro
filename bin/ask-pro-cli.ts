@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import "dotenv/config";
 import { AssistantStoppedError } from "../src/browser/errors.js";
+import { AssistantQuestionsError } from "../src/browser/actions/questions.js";
+import { readAskProQuestions } from "../src/ask-pro/questions.js";
 import { GITHUB_SETUP_URL, GitHubConnectionRequiredError } from "../src/browser/actions/github.js";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -32,6 +34,7 @@ interface AskProOptions {
   dryRun?: boolean;
   files?: string[];
   promptFile?: string;
+  answers?: string;
   artifacts?: boolean;
   github?: boolean;
   responseZip?: boolean;
@@ -65,6 +68,11 @@ program
     ]),
   )
   .option("--resume [session-id]", "resume a prepared or waiting ask-pro session")
+  .addOption(
+    new Option("--answers <path>", "answer native questions from JSON; use - for stdin")
+      .implies({ resume: true })
+      .conflicts(["status", "harvest", "copy", "dryRun", "promptFile"]),
+  )
   .option("--status [session-id]", "show ask-pro session status")
   .option("--harvest [session-id]", "print harvested ANSWER.md for a session")
   .option("--copy [session-id]", "print the copy target for a session")
@@ -90,6 +98,8 @@ await program.parseAsync(process.argv);
 
 async function runAskPro(question: string, options: AskProOptions): Promise<void> {
   const cwd = resolveProjectCwd(options);
+  if (options.answers && question.trim())
+    throw new Error("Use --answers with --resume, without a question argument.");
   await pruneExpiredAskProSessions({ cwd });
   if (options.status !== undefined) {
     const { status } = await readAskProStatus({ cwd, sessionId: optionSessionId(options.status) });
@@ -150,6 +160,14 @@ async function runAskPro(question: string, options: AskProOptions): Promise<void
   }
   if (options.resume !== undefined) {
     const { status } = await readAskProStatus({ cwd, sessionId: optionSessionId(options.resume) });
+    if (options.answers !== undefined && options.temporary !== undefined) {
+      const metadata = await readBrowserMetadata(cwd, status.sessionId);
+      const savedTemporary = metadata?.temporary ?? metadata?.url?.includes("temporary-chat=true");
+      if (savedTemporary !== options.temporary)
+        throw new Error(
+          "Cannot change Temporary Chat mode while answering questions; resume with the saved mode.",
+        );
+    }
     const effectiveOptions = mergeStatusOptions(options, status);
     const resumeCommand = buildResumeCommand(status.sessionId, effectiveOptions, cwd);
     const harvestCommand = buildHarvestCommand(status.sessionId, cwd);
@@ -242,6 +260,12 @@ async function submitOrResumeBrowserSession(
   options: AskProOptions,
 ): Promise<void> {
   const { status } = await readAskProStatus({ cwd, sessionId });
+  if (options.answers !== undefined && status.status !== "AWAITING_ANSWERS")
+    throw new Error(
+      "This session is not waiting for answers. Resume without --answers to inspect it.",
+    );
+  if (options.answers === "-" && process.stdin.isTTY)
+    throw new Error("--answers - requires piped stdin.");
   if (status.status === "COMPLETED" || status.status === "HARVESTED") {
     printStatusRecord(status, {
       ...(await readBrowserPreflight(cwd, status)),
@@ -251,6 +275,7 @@ async function submitOrResumeBrowserSession(
   }
   if (
     status.status === "WAITING" ||
+    status.status === "AWAITING_ANSWERS" ||
     status.status === "WAIT_TIMED_OUT" ||
     status.status === "INCOMPLETE_ANSWER" ||
     status.status === "NEEDS_USER_AUTH" ||
@@ -262,6 +287,12 @@ async function submitOrResumeBrowserSession(
         sessionId,
         temporary: options.temporary,
         verbose: options.verbose,
+        answers:
+          options.answers === undefined
+            ? undefined
+            : options.answers === "-"
+              ? await readStdin()
+              : await fs.readFile(path.resolve(cwd, options.answers), "utf8"),
       });
     } catch (error) {
       if (error instanceof GitHubConnectionRequiredError) {
@@ -269,7 +300,7 @@ async function submitOrResumeBrowserSession(
         printStatusRecord(paused);
         return;
       }
-      if (error instanceof AssistantStoppedError) {
+      if (error instanceof AssistantStoppedError || error instanceof AssistantQuestionsError) {
         const { status: stopped } = await readAskProStatus({ cwd, sessionId });
         printStatusRecord(stopped, await readBrowserPreflight(cwd, stopped));
         return;
@@ -305,7 +336,7 @@ async function submitOrResumeBrowserSession(
       printStatusRecord(paused);
       return;
     }
-    if (error instanceof AssistantStoppedError) {
+    if (error instanceof AssistantStoppedError || error instanceof AssistantQuestionsError) {
       const { status: stopped } = await readAskProStatus({ cwd, sessionId });
       printStatusRecord(stopped, await readBrowserPreflight(cwd, stopped));
       return;
@@ -458,6 +489,8 @@ function actionForStatus(status: AskProStatusFile): string {
   switch (status.status) {
     case "NEEDS_GITHUB_CONNECTION":
       return "connect_github_then_resume";
+    case "AWAITING_ANSWERS":
+      return "answer_questions";
     case "DRY_RUN_COMPLETE":
     case "INCOMPLETE_ANSWER":
     case "READY_TO_SUBMIT":
@@ -482,6 +515,7 @@ function shouldPrintResume(status: AskProStatusFile): boolean {
     "DRY_RUN_COMPLETE",
     "INCOMPLETE_ANSWER",
     "WAITING",
+    "AWAITING_ANSWERS",
     "READY_TO_SUBMIT",
     "NEEDS_USER_AUTH",
     "NEEDS_GITHUB_CONNECTION",
@@ -510,7 +544,7 @@ async function readRecoverableCapturedAnswer(
   cwd: string,
   status: AskProStatusFile,
 ): Promise<string | null> {
-  if (status.status === "INCOMPLETE_ANSWER") {
+  if (status.status === "INCOMPLETE_ANSWER" || status.status === "AWAITING_ANSWERS") {
     return null;
   }
   try {
@@ -545,7 +579,25 @@ async function readBrowserPreflightForSession(
   if (!metadata) return {};
   const profileDir = typeof metadata.profileDir === "string" ? metadata.profileDir : undefined;
   const profile = profileMode(profileDir);
+  const questions: AskProToonFields = {};
+  if (metadata.status === "awaiting_answers") {
+    const request = await readAskProQuestions(getAskProSessionPaths(cwd, sessionId).dir);
+    questions.request_id = request.requestId;
+    questions.questions = request.questions.length;
+    questions.questions_file = `.ask-pro/sessions/${sessionId}/QUESTIONS.json`;
+    questions.reply = `${buildSessionCommand(cwd, ["--resume", sessionId, "--answers", "<answers.json>"])}`;
+    questions.answers_format =
+      '{"requestId":"<request_id>","answers":[1,"free text"]} (one answer per question; choices are 1-based)';
+    for (const [index, question] of request.questions.entries()) {
+      questions[`question_${index + 1}`] = question.question;
+      questions[`options_${index + 1}`] = question.options
+        .map((option, choice) => `${choice + 1}: ${option}`)
+        .join("; ");
+      questions[`free_text_${index + 1}`] = question.freeText;
+    }
+  }
   return compactFields({
+    ...questions,
     profile,
     profile_path: profile && profileDir ? collapseHome(profileDir) : undefined,
     chrome: chromeMode(metadata),

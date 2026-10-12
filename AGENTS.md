@@ -6,7 +6,7 @@ ask_pro-specific notes:
   reduced to the V1 ask-pro surface.
 - Keep the CLI small: `ask-pro "<question>"`, `--files`, `--prompt-file`,
   `--artifacts` / `--response-zip`, `--dry-run`, `--resume`, `--status`,
-  `--harvest`, `--copy`, `--temporary`, `--no-temporary`, and
+  `--harvest`, `--copy`, `--answers`, `--temporary`, `--no-temporary`, and
   `--verbose`, and `--github`.
 - Browser auth is human-controlled. Never ask for, type, read, or log passwords,
   MFA codes, recovery codes, session cookies, or raw auth tokens.

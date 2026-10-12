@@ -1,8 +1,66 @@
 import { runInNewContext } from "node:vm";
 import { describe, expect, test, vi } from "vitest";
-import { __test__ } from "../../src/browser/actions/promptComposer.js";
+import { __test__, submitPrompt } from "../../src/browser/actions/promptComposer.js";
 
 describe("prompt composer actions", () => {
+  test("keeps answers retryable when the composer rejects input before sending", async () => {
+    const evaluate = vi.fn(async ({ expression }: { expression: string }) => ({
+      result: {
+        value: expression.includes("document.readyState")
+          ? { ready: true, composer: true }
+          : { healthy: false, reason: "disabled", activeDisabled: true },
+      },
+    }));
+    const insertText = vi.fn();
+    const submissionState = { started: false };
+    await expect(
+      submitPrompt(
+        { runtime: { evaluate } as never, input: { insertText } as never, submissionState },
+        "Answers",
+        vi.fn<(message: string) => void>(),
+      ),
+    ).rejects.toThrow("not accepting input");
+    expect(submissionState.started).toBe(false);
+    expect(insertText).not.toHaveBeenCalled();
+  });
+
+  test("tracks whether a send click happened or may have happened", async () => {
+    const submissionState = { started: false };
+    const evaluate = vi.fn().mockResolvedValue({ result: { value: "missing" } });
+    await expect(
+      __test__.attemptSendButton(
+        { evaluate } as never,
+        undefined,
+        undefined,
+        undefined,
+        submissionState,
+      ),
+    ).resolves.toBe(false);
+    expect(submissionState.started).toBe(false);
+    evaluate.mockResolvedValueOnce({ result: { value: "clicked" } });
+    await expect(
+      __test__.attemptSendButton(
+        { evaluate } as never,
+        undefined,
+        undefined,
+        undefined,
+        submissionState,
+      ),
+    ).resolves.toBe(true);
+    expect(submissionState.started).toBe(true);
+    submissionState.started = false;
+    evaluate.mockRejectedValueOnce(new Error("Disconnected during click"));
+    await expect(
+      __test__.attemptSendButton(
+        { evaluate } as never,
+        undefined,
+        undefined,
+        undefined,
+        submissionState,
+      ),
+    ).rejects.toThrow("Disconnected");
+    expect(submissionState.started).toBe(true);
+  });
   test("accepts an active answer when turn selectors miss the submitted prompt", async () => {
     const evaluate = vi.fn(async (_: { expression: string }) => ({
       result: {

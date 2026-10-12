@@ -4,6 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { resumeBrowserSession } from "../../src/browser/reattach.js";
 import { AssistantStoppedError } from "../../src/browser/errors.js";
+import { AssistantQuestionsError } from "../../src/browser/actions/questions.js";
+import { readAssistantSnapshot } from "../../src/browser/actions/assistantResponse.js";
+import { submitPrompt } from "../../src/browser/actions/promptComposer.js";
 import {
   buildConversationUrl,
   extractConversationIdFromUrl,
@@ -11,12 +14,76 @@ import {
 import type { ChromeClient } from "../../src/browser/types.js";
 
 const tempDirs: string[] = [];
+vi.mock("../../src/browser/actions/promptComposer.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/browser/actions/promptComposer.js")>()),
+  submitPrompt: vi.fn(),
+}));
 
 afterEach(async () => {
+  vi.clearAllMocks();
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
 describe("reattach browser lease", () => {
+  test.each(["native", "expired"])(
+    "captures the answer after %s questions are submitted",
+    async (mode) => {
+      const questions = [{ question: "Color?", options: ["Blue"], freeText: true }];
+      let turns = 2;
+      let snapshot = { text: "Previous reply", turnIndex: 1 };
+      const client = {
+        close: vi.fn().mockResolvedValue(undefined),
+        Input: {},
+        Runtime: {
+          evaluate: async ({ expression }: { expression: string }) => ({
+            result: {
+              value:
+                expression === "location.href"
+                  ? "https://chatgpt.com/c/test"
+                  : expression.endsWith(".length")
+                    ? turns
+                    : expression.includes("const MIN_TURN_INDEX")
+                      ? snapshot
+                      : expression.includes("const submission =")
+                        ? {
+                            questions: mode === "native" ? questions : null,
+                            started: mode === "native",
+                          }
+                        : 2,
+            },
+          }),
+        },
+      } as unknown as ChromeClient;
+      // Sending commits a new user turn before the next assistant turn appears.
+      vi.mocked(submitPrompt).mockImplementationOnce(async () => {
+        turns = 3;
+        return turns;
+      });
+      const result = await resumeBrowserSession(
+        { chromePort: 9222, conversationId: "test" },
+        {},
+        vi.fn<(message: string) => void>(),
+        {
+          listTargets: async () => [
+            { targetId: "test", type: "page", url: "https://chatgpt.com/c/test" },
+          ],
+          connect: async () => client,
+          questionAnswers: { answers: [1], questions, submissionState: { started: false } },
+          waitForAssistantResponse: async (runtime, _timeout, _logger, minTurnIndex) => {
+            if (mode === "expired")
+              expect(await readAssistantSnapshot(runtime, minTurnIndex)).toBeNull();
+            snapshot = { text: "Fresh answer: Blue", turnIndex: mode === "native" ? 1 : 3 };
+            const answer = await readAssistantSnapshot(runtime, minTurnIndex);
+            expect(answer?.text).toBe("Fresh answer: Blue");
+            return { text: answer!.text!, meta: {} };
+          },
+          captureAssistantMarkdown: async () => null,
+        },
+      );
+      expect(result.answerText).toBe("Fresh answer: Blue");
+      expect(client.close).toHaveBeenCalledOnce();
+    },
+  );
   test("discards a stored provisional route before recovering an interrupted session", async () => {
     const recoverSession = vi.fn().mockResolvedValue({
       answerText: "Recovered answer",
@@ -46,9 +113,16 @@ describe("reattach browser lease", () => {
     ).toBeNull();
     expect(extractConversationIdFromUrl(saved)).toBe("795d079e-6c4d-4334-b0ae-4534c70305bd");
   });
-  test("returns an exhausted continuation to the caller instead of relaunching", async () => {
+  test.each([
+    new AssistantStoppedError(3),
+    new AssistantQuestionsError([{ question: "Which color?", options: ["Blue"], freeText: true }]),
+  ])("returns $name to the caller and closes its connection without relaunching", async (error) => {
     const recoverSession = vi.fn();
+    let connected = true;
     const client = {
+      close: async () => {
+        connected = false;
+      },
       Runtime: {
         evaluate: async ({ expression }: { expression: string }) => ({
           result: { value: expression === "location.href" ? "https://chatgpt.com/c/test" : 2 },
@@ -67,27 +141,29 @@ describe("reattach browser lease", () => {
           ],
           connect: async () => client,
           waitForAssistantResponse: async () => {
-            throw new AssistantStoppedError(3);
+            throw error;
           },
           recoverSession,
         },
       ),
-    ).rejects.toBeInstanceOf(AssistantStoppedError);
+    ).rejects.toBe(error);
+    expect(connected).toBe(false);
     expect(recoverSession).not.toHaveBeenCalled();
   });
 
-  test("releases its lease before falling back after an attach failure", async () => {
-    const profileDir = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-lease-"));
-    tempDirs.push(profileDir);
-    const recovered = {
-      answerText: "recovered",
-      answerMarkdown: "recovered",
-      chromeMode: "relaunched" as const,
-    };
-    const recoverSession = vi.fn().mockResolvedValue(recovered);
+  test.each(["ordinary", "pending answers", "uncertain submission"])(
+    "releases its lease after an attach failure: %s",
+    async (mode) => {
+      const profileDir = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-lease-"));
+      tempDirs.push(profileDir);
+      const recovered = {
+        answerText: "recovered",
+        answerMarkdown: "recovered",
+        chromeMode: "relaunched" as const,
+      };
+      const recoverSession = vi.fn().mockResolvedValue(recovered);
 
-    await expect(
-      resumeBrowserSession(
+      const result = resumeBrowserSession(
         { chromePort: 9222, userDataDir: profileDir },
         {
           manualLogin: true,
@@ -100,11 +176,21 @@ describe("reattach browser lease", () => {
             throw new Error("attach failed");
           },
           recoverSession,
+          questionAnswers:
+            mode === "ordinary"
+              ? undefined
+              : {
+                  answers: [1],
+                  questions: [{ question: "Color?", options: ["Blue"], freeText: true }],
+                  submissionState: { started: mode === "uncertain submission" },
+                },
         },
-      ),
-    ).resolves.toEqual(recovered);
+      );
+      if (mode === "uncertain submission") await expect(result).rejects.toThrow("attach failed");
+      else await expect(result).resolves.toEqual(recovered);
 
-    expect(recoverSession).toHaveBeenCalledOnce();
-    await expect(fs.readdir(path.join(profileDir, "ask-pro-browser-runs"))).resolves.toEqual([]);
-  });
+      expect(recoverSession).toHaveBeenCalledTimes(mode === "uncertain submission" ? 0 : 1);
+      await expect(fs.readdir(path.join(profileDir, "ask-pro-browser-runs"))).resolves.toEqual([]);
+    },
+  );
 });

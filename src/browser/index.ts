@@ -58,6 +58,7 @@ import { formatElapsed } from "./format.js";
 import { CHATGPT_URL, CONVERSATION_TURN_SELECTOR, DEFAULT_MODEL_STRATEGY } from "./constants.js";
 import type { LaunchedChrome } from "chrome-launcher";
 import { AssistantStoppedError, BrowserAutomationError } from "./errors.js";
+import { AssistantQuestionsError } from "./actions/questions.js";
 import { defaultAskProBrowserProfileDir } from "./profilePaths.js";
 import { applyPageLanguageOverrides, seedChromeProfileLanguage } from "./language.js";
 import {
@@ -1626,6 +1627,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     };
   } catch (error) {
     let normalizedError = error instanceof Error ? error : new Error(String(error));
+    if (normalizedError instanceof AssistantQuestionsError) {
+      preserveBrowserOnError = true;
+      preserveWindowStateOnError = true;
+      await emitRuntimeHint();
+      throw normalizedError;
+    }
     if (normalizedError instanceof GitHubConnectionRequiredError) {
       preserveBrowserOnError = true;
       await revealAuthenticatedWindow("github-connection-required");
