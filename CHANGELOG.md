@@ -18,6 +18,9 @@
 
 ### Fixed
 
+- Recognize ChatGPT's current Stop control when reporting thinking activity,
+  instead of repeatedly reporting that no thinking status was detected.
+
 - Wait for the new reply when answering expired question cards, and keep
   answers retryable when the composer rejects input before sending.
 

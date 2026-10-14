@@ -1,6 +1,10 @@
 import type { BrowserLogger, ChromeClient } from "../types.js";
 import { formatElapsed } from "../format.js";
-import { ASSISTANT_ROLE_SELECTOR, CONVERSATION_TURN_SELECTOR } from "../constants.js";
+import {
+  ASSISTANT_ROLE_SELECTOR,
+  CONVERSATION_TURN_SELECTOR,
+  STOP_BUTTON_SELECTOR,
+} from "../constants.js";
 
 const THINKING_STALE_HINT_MS = 10 * 60_000;
 
@@ -237,13 +241,15 @@ function buildThinkingStatusExpression(): string {
         [node.textContent, node.getAttribute?.('aria-label'), node.getAttribute?.('title')]
           .some((label) => normalize(label) === expected),
       );
-    if (hasControl('answer now') && hasControl('stop answering')) {
+    const stopActive = hasControl('stop answering') ||
+      Array.from(document.querySelectorAll(${JSON.stringify(STOP_BUTTON_SELECTOR)})).some(isVisible);
+    if (hasControl('answer now') && stopActive) {
       return {
         message: 'pro gate active',
         source: 'inline',
       };
     }
-    if (hasControl('stop answering')) {
+    if (stopActive) {
       return { message: 'active', source: 'inline' };
     }
     const looksLikeThinking = (node) => {

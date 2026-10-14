@@ -77,6 +77,11 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 
 Future Windows gotchas belong here.
 
+- October 14: thinking-status monitoring now uses the same visible composer Stop
+  selector as submission and response capture. The current icon-only
+  `aria-label="Stop"` control confirms activity without a separate thinking label;
+  hidden controls do not. The monitor never clicks Stop or Answer now.
+
 - October 12: native clarification cards use
   `data-codex-composer-request-navigation` and show one question at a time.
   Pointer interaction requests a pause, but the live server returned 409
