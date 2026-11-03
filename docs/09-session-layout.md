@@ -104,6 +104,5 @@ process.
 
 `browser.json` records the exact browser profile path used for the run. When
 `ASK_PRO_AGENT_ID` is set, that path is agent-specific so reattach uses the same
-isolated profile. Resume accepts the exact former
-`~/.agents/skills/ask-pro/.../browser-profile` only for the one-time migration
-to `$CODEX_HOME/state/ask-pro/`; other external profile paths fail closed.
+isolated profile. Resume rejects profile paths outside
+`~/.agents/state/ask-pro/`.

@@ -198,41 +198,6 @@ function parseProfileRunLock(payload: string | null): ProfileRunLockRecord | nul
   }
 }
 
-export async function isBrowserProfileInUse(
-  userDataDir: string,
-  options: { ignoreLockId?: string } = {},
-): Promise<boolean> {
-  const lockPath = path.join(userDataDir, ASK_PRO_PROFILE_LOCK_FILENAME);
-  let lockPayload: string | null;
-  try {
-    lockPayload = await readFile(lockPath, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
-    lockPayload = null;
-  }
-  let lock = parseProfileRunLock(lockPayload);
-  if (lockPayload !== null && !lock) {
-    await delay(200);
-    try {
-      lockPayload = await readFile(lockPath, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
-      lockPayload = null;
-    }
-    lock = parseProfileRunLock(lockPayload);
-  }
-  if (lock && lock.lockId !== options.ignoreLockId && isProcessAlive(lock.pid)) return true;
-
-  const pid = await readChromePid(userDataDir);
-  const port = await readDevToolsPort(userDataDir);
-  const [owner, devTools] = await Promise.all([
-    isChromeUsingUserDataDir(userDataDir),
-    port ? verifyDevToolsReachable({ port, attempts: 1 }) : null,
-  ]);
-  if (owner === true || (pid && isProcessAlive(pid) && devTools?.ok)) return true;
-  return owner === null;
-}
-
 export async function acquireProfileRunLock(
   userDataDir: string,
   options: {
@@ -240,8 +205,6 @@ export async function acquireProfileRunLock(
     pollMs?: number;
     logger?: ProfileStateLogger;
     sessionId?: string;
-    requireExistingProfile?: boolean;
-    staleLockMode?: "remove" | "fail";
   },
 ): Promise<ProfileRunLock | null> {
   const timeoutMs = options.timeoutMs;
@@ -265,11 +228,7 @@ export async function acquireProfileRunLock(
         createdAt: new Date().toISOString(),
         sessionId: options.sessionId,
       };
-      if (options.requireExistingProfile) {
-        await stat(userDataDir);
-      } else {
-        await mkdir(path.dirname(lockPath), { recursive: true });
-      }
+      await mkdir(path.dirname(lockPath), { recursive: true });
       await writeFile(lockPath, JSON.stringify(payload), { encoding: "utf8", flag: "wx" });
       options.logger?.(`Acquired ask-pro profile lock at ${lockPath}`);
       return {
@@ -288,18 +247,12 @@ export async function acquireProfileRunLock(
         await delay(200);
         existing = parseProfileRunLock(await readFile(lockPath, "utf8").catch(() => null));
         if (!existing) {
-          if (options.staleLockMode === "fail") {
-            throw new Error("ask-pro profile lock is unreadable; refusing stale lock removal.");
-          }
           options.logger?.("ask-pro profile lock unreadable; deleting lockfile.");
           await rm(lockPath, { force: true }).catch(() => undefined);
           continue;
         }
       }
       if (!existing || !isProcessAlive(existing.pid)) {
-        if (options.staleLockMode === "fail") {
-          throw new Error("ask-pro profile lock owner is not alive; refusing stale lock removal.");
-        }
         await rm(lockPath, { force: true }).catch(() => undefined);
         continue;
       }

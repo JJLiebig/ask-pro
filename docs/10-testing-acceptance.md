@@ -88,12 +88,15 @@ Expected:
 V1 is done when all are true:
 
 - `ask-pro` binary exists.
-- `$ask-pro` skill exists at `skills/ask-pro/SKILL.md`.
+- `$ask-pro` skill exists at the repo root as `SKILL.md`, installable with
+  `npx skills add JJLiebig/ask-pro -g` or as the Codex marketplace plugin, whose
+  `skills/ask-pro/SKILL.md` points to it.
 - Normal path requires no preset/model flags.
 - Local/session naming uses project `.ask-pro/` sessions and persistent browser
-  profiles under `$CODEX_HOME/state/ask-pro/`.
-- Installed plugin caches stay immutable; cached launches bootstrap and execute
-  from `$CODEX_HOME/plugin-runtimes/ask-pro/`.
+  profiles under `~/.agents/state/ask-pro/`.
+- The installed skill folder stays unchanged; its launcher builds and runs from
+  `~/.agents/state/ask-pro/runtimes/` and removes that install's other builds
+  once they are no longer in use.
 - User-facing text does not say “smart guy”.
 - Browser automation can open or attach to ChatGPT.
 - Auth gate returns `NEEDS_USER_AUTH` instead of handling credentials.
