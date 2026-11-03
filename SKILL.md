@@ -9,6 +9,21 @@ Use `$ask-pro` to ask ChatGPT Pro for a focused second opinion on hard engineeri
 
 The calling agent still owns the work. Use Pro for judgment, architecture, risk review, or implementation planning when the decision is consequential enough to justify a browser run.
 
+## Running ask-pro
+
+This skill folder contains ask-pro itself; nothing else needs installing. In
+the commands below, `ask-pro` stands for:
+
+```bash
+node <skill-folder>/scripts/ask-pro.mjs
+```
+
+`<skill-folder>` is the directory containing this `SKILL.md`. Run it from the
+target repo root. The first run after an install or update installs
+dependencies and builds, which can take a few minutes; wait for it. The CLI's
+emitted `resume` and `harvest` commands already contain the full launcher path;
+run them as printed. Node.js 24+, npm, and Chrome are required.
+
 ## Trigger
 
 Use this skill when the user explicitly asks for `$ask-pro`, or when a second opinion would materially reduce risk for:
@@ -44,18 +59,6 @@ When invoked:
    For multiline prompts, write a temporary prompt file and use
    `ask-pro --no-temporary --prompt-file <path> --files "<glob>"`; do not rely
    on shell multiline quoting.
-   If installed through the skills CLI and `ask-pro` is not on `PATH`, install
-   the standalone CLI from the [README](https://github.com/JJLiebig/ask-pro#skills-cli-codex-and-other-supported-agents)
-   first. For Codex plugin installs without `ask-pro` on `PATH`, use the cached
-   plugin runner. Locate it under the installed plugin cache,
-   usually
-   `~/.codex/plugins/cache/<marketplace-name>/ask-pro/<version>/scripts/run-cached-cli.mjs`,
-   then call it with:
-   `node <cached-runner> -- --cwd <target-repo-root> --no-temporary --prompt-file <path> --files "<repo-relative-glob>"`.
-   On Git marketplace installs, the first cached-runner call may bootstrap the
-   content-addressed runtime under `$CODEX_HOME/plugin-runtimes/ask-pro/` by
-   installing dependencies and building `dist`; wait for that to finish. The
-   installed plugin cache stays immutable.
 6. If auth is required, stop and ask the human to log in in the opened browser.
 7. Read the CLI's compact `ask_pro` record and run the emitted `resume` or
    `harvest` command when that is the next action.
@@ -81,7 +84,7 @@ attention, ask-pro should restore or retain the browser and emit the next
 action.
 
 Do not set `ASK_PRO_AGENT_ID` for ordinary or concurrent use; the shared
-`ask-pro` browser profile under `$CODEX_HOME/state/ask-pro/` handles concurrent
+`ask-pro` browser profile under `~/.agents/state/ask-pro/` handles concurrent
 agents automatically. Set `ASK_PRO_AGENT_ID` only when explicitly testing an
 isolated profile or when the human requests a separate browser login. Use a
 stable reusable lowercase id like `review-t1`, not a one-off task slug, because
@@ -213,17 +216,7 @@ ask-pro --resume <session-id>
 ask-pro --harvest <session-id>
 ```
 
-If the binary is not on `PATH`, skills CLI installs need the standalone CLI from
-the README. Codex plugin installs can use the cached plugin runner. Do not run
-the plugin from a mutable development checkout; it may contain in-flight changes
-that have not been synced for agents.
-
-```bash
-node <cached-runner> -- --cwd /path/to/repo --no-temporary --prompt-file question.md --files src
-```
-
-In cached-runner fallback mode, `--files` must be inside `--cwd`. Use
-repo-relative `--files`; do not point at files outside the target repo cwd.
+`--files` must be inside the target repo. Use repo-relative paths.
 
 ## Safety
 

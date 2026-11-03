@@ -9,7 +9,7 @@ Repo/package: ask_pro
 CLI binary:   ask-pro
 Agent skill:  $ask-pro
 Project dir:  .ask-pro/
-Global state: $CODEX_HOME/state/ask-pro/
+Global state: ~/.agents/state/ask-pro/
 ```
 
 Explicitly isolated browser profiles:
@@ -19,11 +19,10 @@ ASK_PRO_AGENT_ID=review-t1 ask-pro "<question>"
 ```
 
 This stores the persistent browser profile under
-`$CODEX_HOME/state/ask-pro/agents/review-t1-<hash>/browser-profile`.
+`~/.agents/state/ask-pro/agents/review-t1-<hash>/browser-profile`.
 
-`CODEX_HOME` defaults to `~/.codex`. An inactive profile at the former
-`~/.agents/skills/ask-pro/` location is moved once on first use. ask-pro
-refuses active-profile migration and profile collisions instead of merging.
+`ASK_PRO_STATE_DIR` overrides the global state folder, for tests and isolated
+runs.
 
 `ASK_PRO_AGENT_ID` must be lowercase and may contain only letters, numbers,
 `.`, `_`, or `-`.
@@ -145,7 +144,7 @@ ask_pro
   state: needs_auth
   reason: login_page_detected
   profile: shared
-  profile_path: ~/.codex/state/ask-pro/browser-profile
+  profile_path: ~/.agents/state/ask-pro/browser-profile
   chrome: launched
   language: "en-US,en"
   action: human_login_then_resume

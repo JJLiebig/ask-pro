@@ -11,13 +11,18 @@ const args = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
 const sourceScript = fileURLToPath(import.meta.url);
 const sourceRoot = path.resolve(path.dirname(sourceScript), "..");
 const projectCwd = process.cwd();
-const codexHome = path.resolve(process.env.CODEX_HOME?.trim() || path.join(os.homedir(), ".codex"));
+const stateRoot = process.env.ASK_PRO_STATE_DIR?.trim()
+  ? path.resolve(process.env.ASK_PRO_STATE_DIR.trim())
+  : path.join(os.homedir(), ".agents", "state", "ask-pro");
+const runtimesRoot = path.join(stateRoot, "runtimes");
+const READY_MARKER = ".ask-pro-runtime-ready";
 const BUILDING_MARKER = ".ask-pro-runtime-building";
 const BUILD_HEARTBEAT_STALE_MS = 30_000;
+const STAGING_STALE_MS = 24 * 60 * 60 * 1000;
 const runtimeRoot = await ensureRuntime();
 const cliEntry = path.join(runtimeRoot, "dist", "bin", "ask-pro-cli.js");
 const launcher = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(sourceScript)} --`;
-const lease = path.join(runtimeRoot, `.active-${process.pid}.json`);
+const leases = [leasePath(runtimeRoot, process.pid)];
 
 try {
   process.exitCode = await run(
@@ -27,27 +32,30 @@ try {
       cwd: projectCwd,
       env: {
         ...process.env,
-        CODEX_HOME: codexHome,
         INIT_CWD: projectCwd,
         ASK_PRO_SOURCE_CHECKOUT_LAUNCHER: launcher,
       },
     },
     true,
-    (child) => fs.writeFileSync(lease, JSON.stringify({ pid: child.pid })),
+    (child) => {
+      const childLease = leasePath(runtimeRoot, child.pid);
+      fs.writeFileSync(childLease, JSON.stringify({ pid: child.pid }));
+      leases.push(childLease);
+      pruneRuntimes(runtimesRoot, runtimeRoot);
+    },
   );
 } finally {
-  fs.rmSync(lease, { force: true });
+  for (const lease of leases) fs.rmSync(lease, { force: true });
 }
 
 async function ensureRuntime() {
   const packageJsonPath = path.join(sourceRoot, "package.json");
   if (!fs.existsSync(packageJsonPath)) {
-    throw new Error(`ask-pro plugin cache is missing package.json at ${packageJsonPath}`);
+    throw new Error(`ask-pro skill folder is missing package.json at ${packageJsonPath}`);
   }
-  const parent = path.join(codexHome, "plugin-runtimes", "ask-pro");
+  const parent = runtimesRoot;
   fs.mkdirSync(parent, { recursive: true });
-  pruneStaging(parent);
-  pruneRuntimes(parent, null, true);
+  pruneRuntimes(parent, null);
   const staging = path.join(parent, `.staging-${process.pid}-${randomUUID()}`);
   try {
     fs.cpSync(sourceRoot, staging, {
@@ -58,12 +66,9 @@ async function ensureRuntime() {
     const contentHash = hashSource(staging);
     const version = safeKeyPart(packageJson.version || "0.0.0");
     const target = path.join(parent, `${version}-${contentHash.slice(0, 16)}`);
-    const ready = path.join(target, ".ask-pro-runtime-ready");
-    if (fs.existsSync(ready)) {
+    const ready = path.join(target, READY_MARKER);
+    if (fs.existsSync(ready) && claim(target)) {
       fs.rmSync(staging, { recursive: true, force: true });
-      fs.rmSync(path.join(target, BUILDING_MARKER), { force: true });
-      fs.utimesSync(ready, new Date(), new Date());
-      pruneRuntimes(parent, target);
       return target;
     }
     fs.writeFileSync(
@@ -74,9 +79,7 @@ async function ensureRuntime() {
       fs.renameSync(staging, target);
     } catch (error) {
       fs.rmSync(staging, { recursive: true, force: true });
-      if (!(await waitForRuntime(target))) throw error;
-      fs.utimesSync(ready, new Date(), new Date());
-      pruneRuntimes(parent, target);
+      if (!(await waitForRuntime(target)) || !claim(target)) throw error;
       return target;
     }
     const marker = path.join(target, BUILDING_MARKER);
@@ -90,6 +93,7 @@ async function ensureRuntime() {
     heartbeat.unref();
     try {
       await bootstrap(target, packageJson);
+      fs.writeFileSync(leasePath(target, process.pid), JSON.stringify({ pid: process.pid }));
       fs.writeFileSync(ready, `${JSON.stringify({ version, contentHash }, null, 2)}\n`);
       fs.rmSync(marker, { force: true });
     } catch (error) {
@@ -98,7 +102,6 @@ async function ensureRuntime() {
     } finally {
       clearInterval(heartbeat);
     }
-    pruneRuntimes(parent, target);
     return target;
   } catch (error) {
     fs.rmSync(staging, { recursive: true, force: true });
@@ -106,8 +109,25 @@ async function ensureRuntime() {
   }
 }
 
+// Leases the build for this launcher, then confirms a concurrent cleanup did not remove it first.
+function claim(target) {
+  const lease = leasePath(target, process.pid);
+  try {
+    fs.writeFileSync(lease, JSON.stringify({ pid: process.pid }));
+  } catch {
+    return false;
+  }
+  if (fs.existsSync(path.join(target, READY_MARKER))) return true;
+  fs.rmSync(lease, { force: true });
+  return false;
+}
+
+function leasePath(root, pid) {
+  return path.join(root, `.active-${pid}.json`);
+}
+
 async function waitForRuntime(target) {
-  const ready = path.join(target, ".ask-pro-runtime-ready");
+  const ready = path.join(target, READY_MARKER);
   while (!fs.existsSync(ready)) {
     if (!hasLiveBuilder(target) && !fs.existsSync(ready)) return false;
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -115,42 +135,53 @@ async function waitForRuntime(target) {
   return true;
 }
 
-function pruneStaging(parent) {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !entry.name.startsWith(".staging-")) continue;
+// Removes leftover builds. With `keep`, every other finished build goes too, unless a running
+// ask-pro still leases it. A folder that cannot be moved (on Windows, a process still has it
+// open) is skipped and retried on a later run. Cleanup never fails the current run.
+function pruneRuntimes(parent, keep) {
+  let entries;
+  try {
+    entries = fs.readdirSync(parent, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
     const root = path.join(parent, entry.name);
     try {
-      if (fs.statSync(root).mtimeMs < cutoff) fs.rmSync(root, { recursive: true, force: true });
+      if (root === keep) continue;
+      if (entry.name.startsWith(".trash-")) {
+        fs.rmSync(root, { recursive: true, force: true });
+        continue;
+      }
+      if (entry.name.startsWith(".staging-")) {
+        if (fs.statSync(root).mtimeMs < Date.now() - STAGING_STALE_MS) discard(parent, root);
+        continue;
+      }
+      if (entry.name.startsWith(".")) continue;
+      if (!fs.existsSync(path.join(root, READY_MARKER))) {
+        if (!hasLiveBuilder(root)) discard(parent, root);
+        continue;
+      }
+      if (keep && !hasLiveLease(root)) discard(parent, root);
     } catch {
-      // best effort
+      // best effort; retried on a later run
     }
   }
 }
 
-function pruneRuntimes(parent, keep, incompleteOnly = false) {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const root = path.join(parent, entry.name);
-    const ready = path.join(root, ".ask-pro-runtime-ready");
-    if (root === keep) continue;
-    try {
-      if (entry.name.startsWith(".staging-")) continue;
-      if (!fs.existsSync(ready)) {
-        if (!hasLiveBuilder(root) && !fs.existsSync(ready)) {
-          fs.rmSync(root, { recursive: true, force: true });
-        }
-        continue;
-      }
-      if (incompleteOnly) continue;
-      if (fs.statSync(ready).mtimeMs >= cutoff || hasLiveLease(root)) {
-        continue;
-      }
-      fs.rmSync(root, { recursive: true, force: true });
-    } catch {
-      // best-effort cleanup must not block the selected runtime
-    }
+// Moves the folder aside in one step so a partly deleted build is never left behind.
+function discard(parent, root) {
+  const trash = path.join(parent, `.trash-${randomUUID()}`);
+  try {
+    fs.renameSync(root, trash);
+  } catch {
+    return;
+  }
+  try {
+    fs.rmSync(trash, { recursive: true, force: true });
+  } catch {
+    // leftovers are removed on a later run
   }
 }
 
@@ -205,7 +236,7 @@ async function bootstrap(root, packageJson) {
     Object.keys(packageJson.dependencies || {}).length > 0 ||
     Object.keys(packageJson.optionalDependencies || {}).length > 0;
   if (needsInstall) {
-    console.error("[ask-pro] preparing immutable plugin runtime.");
+    console.error("[ask-pro] Preparing first run after install or update.");
     await runNpm(
       [
         "exec",
@@ -269,7 +300,9 @@ function quoteCommandPart(value) {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
+// Setup output goes to stderr so stdout carries only the CLI's own output.
 function runNpm(args, cwd) {
+  const options = { cwd, env: process.env, stdio: ["ignore", 2, 2] };
   const npmCli = path.join(
     path.dirname(process.execPath),
     "node_modules",
@@ -278,13 +311,13 @@ function runNpm(args, cwd) {
     "npm-cli.js",
   );
   if (fs.existsSync(npmCli)) {
-    return run(process.execPath, [npmCli, ...args], { cwd, env: process.env });
+    return run(process.execPath, [npmCli, ...args], options);
   }
-  return run("npm", args, { cwd, env: process.env, shell: process.platform === "win32" });
+  return run("npm", args, { ...options, shell: process.platform === "win32" });
 }
 
 function run(command, args, options, allowNonzero = false, onSpawn) {
-  const child = spawn(command, args, { ...options, stdio: "inherit" });
+  const child = spawn(command, args, { stdio: "inherit", ...options });
   onSpawn?.(child);
   return new Promise((resolve, reject) => {
     child.on("error", reject);

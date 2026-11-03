@@ -6,46 +6,33 @@ and owns the result; ask-pro never applies generated code.
 
 ## Install
 
-Both options need Node.js 24+, Chrome, and a ChatGPT account with Pro access.
-Browser login is manual.
-
-### Codex plugin marketplace
-
 ```powershell
-codex plugin marketplace add JJLiebig/ask-pro
-codex plugin add ask-pro@ask-pro
+npx skills add JJLiebig/ask-pro -g
 ```
 
-This route needs Git and npm. The plugin's cached runner downloads pnpm, builds
-outside the plugin cache, and keeps the installed snapshot unchanged. If
-`ask-pro` is not on `PATH`, the skill uses that runner.
+This installs the `ask-pro` skill for Codex, Claude Code, and the other agents
+the [skills CLI](https://github.com/vercel-labs/skills) supports. The skill
+contains ask-pro itself; its first run installs dependencies and builds, so no
+separate CLI install is needed. Update with `npx skills update`.
 
-Update with `codex plugin marketplace upgrade ask-pro`, then restart Codex to
-load the updated skill.
-
-### Skills CLI (Codex and other supported agents)
-
-Install the skill and its standalone CLI separately:
-
-```powershell
-npx skills add JJLiebig/ask-pro
-npm install --global ask-pro
-```
-
-The [skills CLI](https://github.com/vercel-labs/skills) installs the skill in
-the current project by default. Add `-g` for a user-wide skill or `-a codex`
-to select Codex; it supports other agents too. The npm CLI runs without Codex's
-plugin cache.
-
-Update both parts:
-
-```powershell
-npx skills update
-npm update --global ask-pro
-```
-
-The browser runtime is developed and tested on Windows. Other operating systems
+You need Node.js 24+, npm, Chrome, and a ChatGPT account with Pro access. The
+browser runtime is developed and tested on Windows; other operating systems
 need validation.
+
+**Moving from the Codex plugin:** before the first run of the new skill, and
+while no ask-pro run is active, copy your signed-in browser state once:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.agents\state" | Out-Null
+Copy-Item -Recurse "$HOME\.codex\state\ask-pro" "$HOME\.agents\state\ask-pro"
+```
+
+Then remove the old plugin:
+
+```powershell
+codex plugin remove ask-pro@ask-pro
+codex plugin marketplace remove ask-pro
+```
 
 ## Browser and session state
 
@@ -54,10 +41,9 @@ codes, session cookies, or raw auth tokens. A new browser profile may need one
 manual ChatGPT login. On Windows, ordinary managed Chrome runs start minimized
 and are hidden; login and recovery restore the window for human action.
 
-The persistent profile lives at `$CODEX_HOME/state/ask-pro/browser-profile`, or
-`~/.codex/state/ask-pro/browser-profile` when `CODEX_HOME` is unset. Existing
-legacy profiles are migrated on first use; see [Windows notes](docs/windows-work.md)
-for copy and recovery details.
+ask-pro keeps its state in `~/.agents/state/ask-pro/`: the persistent browser
+profile in `browser-profile/` and the builds of the installed skill in
+`runtimes/`. Set `ASK_PRO_STATE_DIR` to use a different folder.
 
 Project sessions live under `.ask-pro/sessions/<id>/`. Add `.ask-pro/` to your
 project's `.gitignore`. At each invocation, ask-pro deletes entire session
@@ -65,7 +51,9 @@ directories at least seven days old, regardless of state.
 
 ## Use
 
-Ask for a recoverable repo consult:
+Agents run ask-pro through the installed skill, as
+`node <skill-folder>/scripts/ask-pro.mjs`; `ask-pro` below stands for that
+command. Ask for a recoverable repo consult:
 
 ```powershell
 ask-pro --no-temporary --prompt-file question.md --files src --files tests
@@ -86,7 +74,7 @@ ask-pro --harvest <session-id>
 
 Use `ask-pro --help` for the full CLI. For multiline prompts, use
 `--prompt-file`. Prefer `--no-temporary` when recovery matters; `--temporary`
-requires Temporary Chat. The [skill](skills/ask-pro/SKILL.md) has agent guidance.
+requires Temporary Chat. The [skill](SKILL.md) has agent guidance.
 
 When Pro asks native questions, ask-pro returns `awaiting_answers`, prints each
 question and its numbered choices, and saves `QUESTIONS.json`. The calling agent
@@ -154,8 +142,8 @@ pnpm run format:check
 pnpm pack --dry-run
 ```
 
-After changing plugin files, run `pnpm run plugin:refresh` and restart Codex.
-Do not edit the installed plugin cache. Live browser tests are opt-in; see
+To try local changes as an installed skill, run
+`npx skills add <path-to-checkout> -g`. Live browser tests are opt-in; see
 [manual tests](docs/manual-tests.md).
 
 After the build matrix passes on `main`, [CI](.github/workflows/ci.yml) publishes

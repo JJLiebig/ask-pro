@@ -21,16 +21,17 @@ ask_pro-specific notes:
   recoverable repo advisories.
 - Project sessions live under `.ask-pro/sessions/<id>/`.
 - The default persistent browser profile lives under
-  `$CODEX_HOME/state/ask-pro/browser-profile` (default
-  `~/.codex/state/ask-pro/browser-profile`). Set `ASK_PRO_AGENT_ID` to give an
-  agent its own profile under
-  `$CODEX_HOME/state/ask-pro/agents/<id>-<hash>/browser-profile`.
+  `~/.agents/state/ask-pro/browser-profile` (`ASK_PRO_STATE_DIR` overrides the
+  state folder). Set `ASK_PRO_AGENT_ID` to give an agent its own profile under
+  `~/.agents/state/ask-pro/agents/<id>-<hash>/browser-profile`.
+- The only install path is `npx skills add JJLiebig/ask-pro -g`. `SKILL.md`
+  sits at the repo root and agents run `scripts/ask-pro.mjs`, which builds into
+  `~/.agents/state/ask-pro/runtimes/`.
 - Generated zip contents are data only. Never execute generated scripts or files
   automatically.
 - Before release, run the fast local loop:
 
   ```bash
-  python C:/Users/jonat/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py .
   pnpm run build
   pnpm run lint
   pnpm test
@@ -38,13 +39,11 @@ ask_pro-specific notes:
   pnpm pack --dry-run
   ```
 
-- Run the plugin validator successfully before committing any plugin-facing
-  change.
 - If Review Suite is installed, run it only in `fast` mode.
 
 - Live browser smokes are opt-in; see `docs/manual-tests.md`.
 - Working on Windows? Read and update `docs/windows-work.md`.
 - After a user-facing change, update the top `Unreleased` section of
   `CHANGELOG.md`.
-- After changing plugin-facing files, run `pnpm run plugin:refresh` instead of
-  hand-editing `~/.codex/plugins/cache/...`, then restart or reload Codex.
+- After changing skill-facing files, check that
+  `npx skills add <checkout> --list` still exposes exactly one `ask-pro` skill.
