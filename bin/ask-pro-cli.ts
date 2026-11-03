@@ -25,9 +25,12 @@ import {
 } from "../src/ask-pro/browserRunner.js";
 import { renderToonRecord, type AskProToonFields } from "../src/ask-pro/toon.js";
 import {
+  askProAgentIdForLegacyBrowserProfileDir,
   askProAgentIdForManagedBrowserProfileDir,
   defaultAskProBrowserProfileDir,
+  isLegacyAskProManagedBrowserProfileDir,
 } from "../src/browser/profilePaths.js";
+import { migrateLegacyAskProProfiles } from "../src/browser/profileMigration.js";
 import { getCliVersion } from "../src/version.js";
 
 interface AskProOptions {
@@ -101,6 +104,7 @@ async function runAskPro(question: string, options: AskProOptions): Promise<void
   if (options.answers && question.trim())
     throw new Error("Use --answers with --resume, without a question argument.");
   await pruneExpiredAskProSessions({ cwd });
+  await migrateLegacyAskProProfiles({ log: (message) => console.error(message) });
   if (options.status !== undefined) {
     const { status } = await readAskProStatus({ cwd, sessionId: optionSessionId(options.status) });
     printStatusRecord(status, {
@@ -621,8 +625,16 @@ async function readBrowserMetadata(
 
 function profileMode(profileDir: string | undefined): string | undefined {
   if (!profileDir) return undefined;
-  if (askProAgentIdForManagedBrowserProfileDir(profileDir)) return "agent";
-  if (path.resolve(profileDir) === path.resolve(defaultAskProBrowserProfileDir())) return "shared";
+  if (
+    askProAgentIdForManagedBrowserProfileDir(profileDir) ||
+    askProAgentIdForLegacyBrowserProfileDir(profileDir)
+  )
+    return "agent";
+  if (
+    path.resolve(profileDir) === path.resolve(defaultAskProBrowserProfileDir()) ||
+    isLegacyAskProManagedBrowserProfileDir(profileDir)
+  )
+    return "shared";
   return undefined;
 }
 

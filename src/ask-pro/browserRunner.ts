@@ -6,11 +6,14 @@ import { AssistantQuestionsError } from "../browser/actions/questions.js";
 import { readAskProQuestions, parseQuestionAnswers, writeAskProQuestions } from "./questions.js";
 import { GitHubConnectionRequiredError } from "../browser/actions/github.js";
 import {
+  askProAgentIdForLegacyBrowserProfileDir,
   askProAgentIdForManagedBrowserProfileDir,
   askProBrowserProfileDirForAgentId,
   isAskProManagedBrowserProfileDir,
+  isLegacyAskProManagedBrowserProfileDir,
   resolveAskProAgentId,
 } from "../browser/profilePaths.js";
+import { prepareAskProBrowserProfile } from "../browser/profileMigration.js";
 import { runBrowserMode, type BrowserRunResult } from "../browserMode.js";
 import { closeTab } from "../browser/chromeLifecycle.js";
 import { resumeBrowserSession } from "../browser/reattach.js";
@@ -68,7 +71,7 @@ async function runAskProBrowserSessionWithLease({
   const temporary = requestedTemporary ?? (sessionStatus.github ? false : undefined);
   const artifactsRequested = sessionStatus.artifacts === true;
   const agentId = agentIdOverride !== undefined ? agentIdOverride : resolveAskProAgentId();
-  const browserProfile = browserProfileDir ?? askProBrowserProfileDirForAgentId(agentId);
+  const browserProfile = browserProfileDir ?? (await prepareAskProBrowserProfile(agentId));
   const metadata = await readBrowserMetadata(paths.browser).catch(() => null);
   const chatgptUrl =
     chatgptUrlOverride ??
@@ -394,7 +397,7 @@ async function resumeAskProBrowserSessionWithLease({
       : effectiveTemporary === false
         ? ASK_PRO_CHATGPT_URL
         : (metadata.url ?? ASK_PRO_TEMPORARY_CHATGPT_URL);
-  const fallbackProfile = resolveResumeBrowserProfile(metadata);
+  const fallbackProfile = await resolveResumeBrowserProfile(metadata);
   if (
     sessionStatus.status === "NEEDS_GITHUB_CONNECTION" ||
     (sessionStatus.github && metadata.runtime?.githubCheckPending === true)
@@ -917,29 +920,44 @@ async function writeTerminalBrowserMetadata(
   });
 }
 
-function resolveResumeBrowserProfile(metadata: AskProBrowserMetadata): string {
+async function resolveResumeBrowserProfile(metadata: AskProBrowserMetadata): Promise<string> {
   const agentProfile = resolveStoredAgentProfile(metadata.agentId);
   const profileDir = metadata.profileDir;
   const profileAgentId = profileDir ? askProAgentIdForManagedBrowserProfileDir(profileDir) : null;
-  if (profileAgentId && profileAgentId !== metadata.agentId) {
+  const legacyAgentId = profileDir ? askProAgentIdForLegacyBrowserProfileDir(profileDir) : null;
+  if ((profileAgentId ?? legacyAgentId) && (profileAgentId ?? legacyAgentId) !== metadata.agentId) {
     throw new Error("Stored ask-pro agent profile does not match stored agent id.");
   }
   if (profileAgentId && agentProfile) {
     return profileDir!;
   }
+  // Sessions from earlier versions record the old profile location; resume where it is now.
+  if (legacyAgentId && agentProfile) {
+    return prepareAskProBrowserProfile(metadata.agentId);
+  }
   if (
     profileDir &&
     !profileAgentId &&
+    !legacyAgentId &&
     !agentProfile &&
     isAskProManagedBrowserProfileDir(profileDir)
   ) {
     return askProBrowserProfileDirForAgentId(null);
   }
+  if (
+    profileDir &&
+    !profileAgentId &&
+    !legacyAgentId &&
+    !agentProfile &&
+    isLegacyAskProManagedBrowserProfileDir(profileDir)
+  ) {
+    return prepareAskProBrowserProfile(null);
+  }
   if (profileDir) {
     throw new Error("Stored ask-pro profile path is invalid.");
   }
 
-  return askProBrowserProfileDirForAgentId(metadata.agentId);
+  return prepareAskProBrowserProfile(metadata.agentId);
 }
 
 function resolveStoredAgentProfile(agentId: string | null | undefined): string | null {

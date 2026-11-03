@@ -84,9 +84,12 @@
 ### Changed
 
 - Move all ask-pro state to `~/.agents/state/ask-pro/`, overridable with
-  `ASK_PRO_STATE_DIR`. There is no automatic migration: to keep a signed-in
-  Codex plugin profile, copy `~/.codex/state/ask-pro` to
-  `~/.agents/state/ask-pro` once before the first run (see the README).
+  `ASK_PRO_STATE_DIR`. The first run after upgrading moves signed-in browser
+  profiles there from `$CODEX_HOME/state/ask-pro` and `~/.agents/skills/ask-pro`,
+  so no new login is needed. A profile Chrome still has open is used where it is
+  and moved on a later run; an existing current profile is never overwritten.
+  The earlier plugin's builds under `$CODEX_HOME/plugin-runtimes/ask-pro` are
+  removed once no run uses them.
 - After an update, remove the skill's previous builds once the new one runs, and
   the builds of uninstalled skill folders. Builds that a running ask-pro still
   uses, or that Windows keeps locked, are retried later. Separate installs keep
@@ -197,7 +200,6 @@
 
 - Remove the Codex plugin's cached runner and its `plugin:refresh` scripts. The
   plugin now runs the same bundled launcher as the skills CLI install.
-- Remove the one-time move of browser profiles from `~/.agents/skills/ask-pro/`.
 
 ### Added
 

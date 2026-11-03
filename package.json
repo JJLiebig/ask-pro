@@ -1,6 +1,6 @@
 {
   "name": "ask-pro",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Browser-backed ChatGPT Pro escalation for hard engineering questions.",
   "keywords": [
     "agents",
@@ -41,6 +41,7 @@
     "dist/src/browser/liveTabs.js",
     "dist/src/browser/modelStrategy.js",
     "dist/src/browser/pageActions.js",
+    "dist/src/browser/profileMigration.js",
     "dist/src/browser/profilePaths.js",
     "dist/src/browser/profileState.js",
     "dist/src/browser/providerDomFlow.js",

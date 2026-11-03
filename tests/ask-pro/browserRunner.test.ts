@@ -2187,6 +2187,63 @@ describe("ask-pro browser runner", () => {
     });
   });
 
+  test("reattach moves a session's profile from an earlier version's state folder", async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-legacy-"));
+    tempDirs.push(cwd);
+    vi.stubEnv("ASK_PRO_STATE_DIR", managedProfileState.root);
+    vi.stubEnv("CODEX_HOME", path.join(cwd, "codex"));
+    const session = await createAskProSession({
+      cwd,
+      question: "Resume the legacy profile.",
+      filePatterns: [],
+      dryRun: false,
+    });
+    const agentId = "review-t1-6d908a4714";
+    const legacyProfile = path.join(
+      cwd,
+      "codex",
+      "state",
+      "ask-pro",
+      "agents",
+      agentId,
+      "browser-profile",
+    );
+    const currentProfile = testAgentProfileDir(agentId);
+    await fs.mkdir(legacyProfile, { recursive: true });
+    await fs.writeFile(path.join(legacyProfile, "Local State"), "signed-in");
+    await writeAskProBrowserMetadata({
+      cwd,
+      sessionId: session.id,
+      metadata: {
+        schemaVersion: 1,
+        status: "running",
+        agentId,
+        profileDir: legacyProfile,
+        runtime: {
+          chromePort: 9556,
+          chromeProfileRoot: legacyProfile,
+          userDataDir: legacyProfile,
+          tabUrl: "https://chatgpt.com/c/test-legacy",
+        },
+      },
+    });
+    await updateAskProStatus({ cwd, sessionId: session.id, status: "WAIT_TIMED_OUT" });
+
+    await resumeAskProBrowserSession({ cwd, sessionId: session.id });
+
+    expect(await fs.readFile(path.join(currentProfile, "Local State"), "utf8")).toBe("signed-in");
+    const resumeCall = resumeBrowserSessionMock.mock.calls[0] as unknown[] | undefined;
+    expect(resumeCall?.[0]).toMatchObject({
+      chromeProfileRoot: currentProfile,
+      userDataDir: currentProfile,
+    });
+    expect(resumeCall?.[1]).toMatchObject({ manualLoginProfileDir: currentProfile });
+    const metadata = JSON.parse(
+      await fs.readFile(path.join(session.dir, "browser.json"), "utf8"),
+    ) as { profileDir?: string };
+    expect(metadata.profileDir).toBe(currentProfile);
+  }, 30_000);
+
   test("reattach rejects runtime profile hints outside the recorded profile", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-runtime-profile-"));
     tempDirs.push(cwd);

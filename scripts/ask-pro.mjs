@@ -18,6 +18,12 @@ const runtimesRoot = path.join(stateRoot, "runtimes");
 // Builds are grouped per installed skill folder: separate installs never remove each other's
 // builds, and only an update of this install replaces the build it uses.
 const installRoot = path.join(runtimesRoot, installKey(sourceRoot));
+// Builds of the Codex plugin's earlier launcher.
+const legacyRuntimesRoot = path.join(
+  path.resolve(process.env.CODEX_HOME?.trim() || path.join(os.homedir(), ".codex")),
+  "plugin-runtimes",
+  "ask-pro",
+);
 const SOURCE_FILE = ".source";
 const LAUNCHER = path.join("scripts", "ask-pro.mjs");
 const READY_MARKER = ".ask-pro-runtime-ready";
@@ -48,6 +54,12 @@ try {
       leases.push(childLease);
       pruneBuilds(installRoot, runtimeRoot);
       pruneUninstalled();
+      pruneBuilds(legacyRuntimesRoot, legacyRuntimesRoot);
+      try {
+        fs.rmdirSync(legacyRuntimesRoot);
+      } catch {
+        // still holds a build in use, or already gone
+      }
     },
   );
 } finally {
@@ -149,9 +161,10 @@ async function waitForRuntime(target) {
   return true;
 }
 
-// Removes this install's leftover builds. With `keep`, every other finished build goes too,
-// unless a running ask-pro still leases it. A folder that cannot be moved (on Windows, a process
-// still has it open) is skipped and retried on a later run. Cleanup never fails the current run.
+// Removes this install's leftover builds. With `keep` (a build, or `parent` to keep none), every
+// other finished build goes too, unless a running ask-pro still leases it. A folder that cannot
+// be moved (on Windows, a process still has it open) is skipped and retried on a later run.
+// Cleanup never fails the current run.
 function pruneBuilds(parent, keep) {
   for (const entry of directories(parent)) {
     const root = path.join(parent, entry);
@@ -335,9 +348,10 @@ function sourceFiles(root) {
   return files.sort((left, right) => left.localeCompare(right));
 }
 
+// Browser profiles of very old versions lived in the skill folder; they move to the state folder.
 function excluded(relative) {
   const first = relative.split(path.sep)[0];
-  return first === "node_modules" || first === ".git" || first === ".ask-pro";
+  return ["node_modules", ".git", ".ask-pro", "browser-profile", "agents"].includes(first);
 }
 
 function safeKeyPart(value) {

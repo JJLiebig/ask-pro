@@ -10,6 +10,11 @@ Read this when working on `ask_pro` from Windows and add new findings here.
   Normal and concurrent agents use this shared profile without configuration.
   Set `ASK_PRO_AGENT_ID` only for an explicitly isolated agent profile under
   `...\state\ask-pro\agents\<id>-<hash>\browser-profile`.
+- Earlier versions kept profiles in `%USERPROFILE%\.codex\state\ask-pro`. The
+  first run moves them with one rename. Chrome keeps its profile open, so
+  Windows refuses that rename while Chrome runs; ask-pro then uses the old
+  profile for that run and moves it on a later one. Tests set `CODEX_HOME` and
+  `ASK_PRO_STATE_DIR` to temp folders so they never touch real profiles.
 - `npx skills add` and the Codex marketplace plugin both install the whole
   repo. Its launcher,
   `scripts\ask-pro.mjs`, installs, builds, and executes under

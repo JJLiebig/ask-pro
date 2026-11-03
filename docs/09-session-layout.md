@@ -105,4 +105,5 @@ process.
 `browser.json` records the exact browser profile path used for the run. When
 `ASK_PRO_AGENT_ID` is set, that path is agent-specific so reattach uses the same
 isolated profile. Resume rejects profile paths outside
-`~/.agents/state/ask-pro/`.
+`~/.agents/state/ask-pro/`, except the profile locations of earlier versions,
+which it resolves to wherever that profile is now.

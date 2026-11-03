@@ -36,6 +36,7 @@ async function installSkill(prefix: string) {
   const skillRoot = path.join(root, "skill");
   const projectCwd = path.join(root, "project");
   const stateDir = path.join(root, "state");
+  const codexHome = path.join(root, "codex");
   const runtimes = path.join(stateDir, "runtimes");
   const launcher = path.join(skillRoot, "scripts", "ask-pro.mjs");
   const cli = path.join(skillRoot, "dist", "bin", "ask-pro-cli.js");
@@ -66,6 +67,7 @@ async function installSkill(prefix: string) {
   const env = {
     ...process.env,
     ASK_PRO_STATE_DIR: stateDir,
+    CODEX_HOME: codexHome,
     INIT_CWD: path.join(root, "stale-init-cwd"),
   };
   const run = async (...args: string[]) => {
@@ -79,7 +81,7 @@ async function installSkill(prefix: string) {
   };
   const buildOf = (output: LauncherOutput) =>
     path.dirname(path.dirname(path.dirname(output.entry)));
-  return { root, skillRoot, projectCwd, runtimes, launcher, writeCli, run, buildOf };
+  return { root, skillRoot, projectCwd, runtimes, codexHome, launcher, writeCli, run, buildOf };
 }
 
 describe("skill launcher", () => {
@@ -140,6 +142,25 @@ describe("skill launcher", () => {
       [path.basename(skill.buildOf(updated)), "0.9.0-leased"].sort(),
     );
     expect(await directories(otherInstall)).toEqual(["0.1.0-other"]);
+  }, 180_000);
+
+  test("removes the earlier plugin launcher's builds once no run uses them", async () => {
+    const skill = await installSkill("ask-pro-launcher-legacy-");
+    const legacyRuntimes = path.join(skill.codexHome, "plugin-runtimes", "ask-pro");
+    const leased = path.join(legacyRuntimes, "0.1.0-leased");
+    for (const build of ["0.1.0-old", "0.1.0-leased"]) {
+      await fs.mkdir(path.join(legacyRuntimes, build), { recursive: true });
+      await fs.writeFile(path.join(legacyRuntimes, build, ".ask-pro-runtime-ready"), "");
+    }
+    await fs.writeFile(path.join(leased, ".active-1.json"), JSON.stringify({ pid: process.pid }));
+
+    await skill.run("status");
+    expect(await directories(legacyRuntimes)).toEqual(["0.1.0-leased"]);
+
+    await fs.rm(path.join(leased, ".active-1.json"));
+    await skill.run("status");
+    await expect(fs.stat(legacyRuntimes)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await directories(path.join(skill.codexHome, "plugin-runtimes"))).toEqual([]);
   }, 180_000);
 
   test.runIf(process.platform === "win32")(

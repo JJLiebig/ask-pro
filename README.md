@@ -23,21 +23,17 @@ codex plugin add ask-pro@ask-pro
 ```
 
 Update with `codex plugin marketplace upgrade ask-pro`, then restart Codex.
-Both installs run the same bundled launcher and share the same state.
+Both installs run the same bundled launcher. The `ask-pro` npm package
+(`npm i -g ask-pro`) still works too. All three share the same state.
 
 You need Node.js 24+, npm, Chrome, and a ChatGPT account with Pro access. The
 browser runtime is developed and tested on Windows; other operating systems
 need validation.
 
-**Upgrading from an earlier version:** ask-pro state moved from
-`~/.codex/state/ask-pro` to `~/.agents/state/ask-pro`. Before the first run
-after upgrading, and while no ask-pro run is active, copy your signed-in browser
-state once:
-
-```powershell
-New-Item -ItemType Directory -Force "$HOME\.agents\state" | Out-Null
-Copy-Item -Recurse "$HOME\.codex\state\ask-pro" "$HOME\.agents\state\ask-pro"
-```
+**Upgrading from an earlier version:** nothing to do. On its first run,
+ask-pro moves your signed-in browser profiles from `~/.codex/state/ask-pro` to
+`~/.agents/state/ask-pro`. If Chrome still has the old profile open, ask-pro
+uses it where it is and moves it on a later run.
 
 ## Browser and session state
 

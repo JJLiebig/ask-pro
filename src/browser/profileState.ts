@@ -198,6 +198,27 @@ function parseProfileRunLock(payload: string | null): ProfileRunLockRecord | nul
   }
 }
 
+// True while an ask-pro run holds the profile or a Chrome process may still have it open. An
+// unanswerable process scan counts as in use.
+export async function isBrowserProfileInUse(
+  userDataDir: string,
+  options: { ignoreLockId?: string } = {},
+): Promise<boolean> {
+  const lock = parseProfileRunLock(
+    await readFile(path.join(userDataDir, ASK_PRO_PROFILE_LOCK_FILENAME), "utf8").catch(() => null),
+  );
+  if (lock && lock.lockId !== options.ignoreLockId && isProcessAlive(lock.pid)) return true;
+
+  const pid = await readChromePid(userDataDir);
+  const port = await readDevToolsPort(userDataDir);
+  const [owner, devTools] = await Promise.all([
+    isChromeUsingUserDataDir(userDataDir),
+    port ? verifyDevToolsReachable({ port, attempts: 1 }) : null,
+  ]);
+  if (owner === true || (pid && isProcessAlive(pid) && devTools?.ok)) return true;
+  return owner === null;
+}
+
 export async function acquireProfileRunLock(
   userDataDir: string,
   options: {

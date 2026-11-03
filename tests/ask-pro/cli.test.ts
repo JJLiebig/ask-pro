@@ -114,6 +114,48 @@ describe("ask-pro cli", () => {
     expect(JSON.parse(statusRaw).resumeCommand).not.toContain("--no-temporary");
   }, 30000);
 
+  test("moves an earlier version's browser profiles on its first run", async () => {
+    const root = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-upgrade-")),
+    );
+    tempDirs.push(root);
+    const cwd = path.join(root, "project");
+    const home = path.join(root, "home");
+    const env = {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      CODEX_HOME: path.join(root, "codex"),
+      ASK_PRO_STATE_DIR: path.join(root, "state"),
+    };
+    const oldState = path.join(env.CODEX_HOME, "state", "ask-pro");
+    const agentProfile = path.join("agents", "review-t1-59cd6bada6", "browser-profile");
+    for (const profile of ["browser-profile", agentProfile]) {
+      await fs.mkdir(path.join(oldState, profile), { recursive: true });
+      await fs.writeFile(path.join(oldState, profile, "Local State"), profile);
+    }
+    await fs.mkdir(cwd);
+    const cli = path.join(process.cwd(), "bin", "ask-pro-cli.ts");
+    const tsxLoader = pathToFileURL(
+      path.join(process.cwd(), "node_modules", "tsx", "dist", "esm", "index.mjs"),
+    ).href;
+
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      ["--import", tsxLoader, cli, "--dry-run", "Review this."],
+      { cwd, env },
+    );
+
+    expect(stderr).toBe("");
+    expect(stdout).toContain("  state: dry_run_complete\n");
+    for (const profile of ["browser-profile", agentProfile]) {
+      expect(
+        await fs.readFile(path.join(env.ASK_PRO_STATE_DIR, profile, "Local State"), "utf8"),
+      ).toBe(profile);
+    }
+    await expect(fs.stat(oldState)).rejects.toMatchObject({ code: "ENOENT" });
+  }, 30000);
+
   test("creates a dry-run session from a prompt file", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-cli-prompt-file-"));
     tempDirs.push(cwd);

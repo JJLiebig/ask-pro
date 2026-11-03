@@ -12,12 +12,15 @@ export function askProBrowserProfileDirForAgentId(
   agentId: string | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return profileDirUnder(askProStateDir(env), agentId);
+  return askProBrowserProfileDirUnder(askProStateDir(env), agentId);
 }
 
-function profileDirUnder(root: string, agentId: string | null | undefined): string {
+export function askProBrowserProfileDirUnder(
+  root: string,
+  agentId: string | null | undefined,
+): string {
   if (!agentId) return path.join(root, "browser-profile");
-  if (!RESOLVED_AGENT_ID_PATTERN.test(agentId)) {
+  if (!isResolvedAskProAgentId(agentId)) {
     throw new Error("Stored ask-pro agent id is invalid.");
   }
   return path.join(root, "agents", agentId, "browser-profile");
@@ -51,12 +54,47 @@ function agentIdForProfileDir(profileDir: string, stateRoot: string): string | n
   const parts = relative.split(path.sep);
   if (parts.length !== 2 || parts[1] !== "browser-profile") return null;
   const agentId = parts[0]!;
-  return RESOLVED_AGENT_ID_PATTERN.test(agentId) ? agentId : null;
+  return isResolvedAskProAgentId(agentId) ? agentId : null;
 }
 
-function askProStateDir(env: NodeJS.ProcessEnv = process.env): string {
+export function isResolvedAskProAgentId(agentId: string): boolean {
+  return RESOLVED_AGENT_ID_PATTERN.test(agentId);
+}
+
+export function askProStateDir(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.ASK_PRO_STATE_DIR?.trim();
   return override ? path.resolve(override) : path.join(os.homedir(), ".agents", "state", "ask-pro");
+}
+
+// State folders of earlier versions, in the order profiles are migrated from them.
+export function legacyAskProStateDirs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const codexHome = env.CODEX_HOME?.trim();
+  const current = normalizeProfilePath(askProStateDir(env));
+  return [
+    path.join(
+      codexHome ? path.resolve(codexHome) : path.join(os.homedir(), ".codex"),
+      "state",
+      "ask-pro",
+    ),
+    path.join(os.homedir(), ".agents", "skills", "ask-pro"),
+  ].filter((dir) => normalizeProfilePath(dir) !== current);
+}
+
+export function askProAgentIdForLegacyBrowserProfileDir(profileDir: string): string | null {
+  for (const root of legacyAskProStateDirs()) {
+    const agentId = agentIdForProfileDir(profileDir, root);
+    if (agentId) return agentId;
+  }
+  return null;
+}
+
+export function isLegacyAskProManagedBrowserProfileDir(profileDir: string): boolean {
+  const resolved = normalizeProfilePath(profileDir);
+  return (
+    legacyAskProStateDirs().some(
+      (root) => normalizeProfilePath(askProBrowserProfileDirUnder(root, null)) === resolved,
+    ) || askProAgentIdForLegacyBrowserProfileDir(profileDir) !== null
+  );
 }
 
 export function resolveAskProAgentId(env: NodeJS.ProcessEnv = process.env): string | null {
