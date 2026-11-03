@@ -27,6 +27,7 @@ const legacyRuntimesRoot = path.join(
 const SOURCE_FILE = ".source";
 const LAUNCHER = path.join("scripts", "ask-pro.mjs");
 const READY_MARKER = ".ask-pro-runtime-ready";
+const RETIRING_MARKER = ".ask-pro-runtime-retiring";
 const BUILDING_MARKER = ".ask-pro-runtime-building";
 const BUILD_HEARTBEAT_STALE_MS = 30_000;
 const STAGING_STALE_MS = 24 * 60 * 60 * 1000;
@@ -96,12 +97,18 @@ async function ensureRuntime() {
       path.join(staging, BUILDING_MARKER),
       JSON.stringify({ pid: process.pid, createdAt: Date.now() }),
     );
-    try {
-      fs.renameSync(staging, target);
-    } catch (error) {
-      fs.rmSync(staging, { recursive: true, force: true });
-      if (!(await waitForRuntime(target)) || !claim(target)) throw error;
-      return target;
+    for (;;) {
+      try {
+        fs.renameSync(staging, target);
+        break;
+      } catch (error) {
+        if ((await waitForRuntime(target)) && claim(target)) {
+          fs.rmSync(staging, { recursive: true, force: true });
+          return target;
+        }
+        // Retry while cleanup is deciding on the build, or once it has removed it.
+        if (fs.existsSync(target) && !isRetiring(target)) throw error;
+      }
     }
     const marker = path.join(target, BUILDING_MARKER);
     const heartbeat = setInterval(() => {
@@ -155,7 +162,7 @@ function leasePath(root, pid) {
 async function waitForRuntime(target) {
   const ready = path.join(target, READY_MARKER);
   while (!fs.existsSync(ready)) {
-    if (!hasLiveBuilder(target) && !fs.existsSync(ready)) return false;
+    if (!hasLiveBuilder(target) && !isRetiring(target) && !fs.existsSync(ready)) return false;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return true;
@@ -182,10 +189,12 @@ function pruneBuilds(parent, keep) {
       const ready = path.join(root, READY_MARKER);
       if (!fs.existsSync(ready)) {
         // Recheck readiness: a build that finished after the first check has no builder marker.
-        if (!hasLiveBuilder(root) && !fs.existsSync(ready)) retire(parent, root);
+        if (!hasLiveBuilder(root) && !isRetiring(root) && !fs.existsSync(ready)) {
+          retire(parent, root);
+        }
         continue;
       }
-      if (keep && !hasLiveLease(root)) retire(parent, root);
+      if (keep) retireUnleased(parent, root);
     } catch {
       // best effort; retried on a later run
     }
@@ -232,15 +241,45 @@ function directories(parent) {
   }
 }
 
+// Cleanup sets a build's ready marker aside before checking its leases, while a launcher leases
+// a build before checking that marker. So either cleanup sees the lease and keeps the build, or
+// the launcher sees the build retiring and does not use it.
+function retireUnleased(parent, root) {
+  const ready = path.join(root, READY_MARKER);
+  const retiring = path.join(root, RETIRING_MARKER);
+  try {
+    fs.renameSync(ready, retiring);
+    fs.utimesSync(retiring, new Date(), new Date());
+  } catch {
+    return;
+  }
+  if (!hasLiveLease(root) && retire(parent, root)) return;
+  try {
+    fs.renameSync(retiring, ready);
+  } catch {
+    // an interrupted retirement is removed on a later run
+  }
+}
+
+function isRetiring(root) {
+  try {
+    const marker = path.join(root, RETIRING_MARKER);
+    return Date.now() - fs.statSync(marker).mtimeMs < BUILD_HEARTBEAT_STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
 // Moves the folder aside in one step so a partly deleted build is never left behind.
 function retire(parent, root) {
   const trash = path.join(parent, `.trash-${randomUUID()}`);
   try {
     fs.renameSync(root, trash);
   } catch {
-    return;
+    return false;
   }
   remove(trash);
+  return true;
 }
 
 function remove(root) {
