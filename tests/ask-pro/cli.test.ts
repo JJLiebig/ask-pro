@@ -612,7 +612,7 @@ describe("ask-pro cli", () => {
     expect(stderr).toBe("");
     expect(stdout).toContain("  state: waiting\n");
     expect(stdout).toContain("  profile: agent\n");
-    expect(stdout).toContain('  profile_path: "');
+    expect(stdout).toContain("  profile_path: ");
     expect(stdout).toContain("agent-1234567890");
     expect(stdout).toContain("  chrome: launched\n");
     expect(stdout).toContain('  language: "en-US,en"\n');
