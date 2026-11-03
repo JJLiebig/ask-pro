@@ -15,23 +15,28 @@ the [skills CLI](https://github.com/vercel-labs/skills) supports. The skill
 contains ask-pro itself; its first run installs dependencies and builds, so no
 separate CLI install is needed. Update with `npx skills update`.
 
+Codex users can install it as a plugin instead:
+
+```powershell
+codex plugin marketplace add JJLiebig/ask-pro
+codex plugin add ask-pro@ask-pro
+```
+
+Update with `codex plugin marketplace upgrade ask-pro`, then restart Codex.
+Both installs run the same bundled launcher and share the same state.
+
 You need Node.js 24+, npm, Chrome, and a ChatGPT account with Pro access. The
 browser runtime is developed and tested on Windows; other operating systems
 need validation.
 
-**Moving from the Codex plugin:** before the first run of the new skill, and
-while no ask-pro run is active, copy your signed-in browser state once:
+**Upgrading from an earlier version:** ask-pro state moved from
+`~/.codex/state/ask-pro` to `~/.agents/state/ask-pro`. Before the first run
+after upgrading, and while no ask-pro run is active, copy your signed-in browser
+state once:
 
 ```powershell
 New-Item -ItemType Directory -Force "$HOME\.agents\state" | Out-Null
 Copy-Item -Recurse "$HOME\.codex\state\ask-pro" "$HOME\.agents\state\ask-pro"
-```
-
-Then remove the old plugin:
-
-```powershell
-codex plugin remove ask-pro@ask-pro
-codex plugin marketplace remove ask-pro
 ```
 
 ## Browser and session state

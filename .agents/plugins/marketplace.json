@@ -1,0 +1,21 @@
+{
+  "name": "ask-pro",
+  "interface": {
+    "displayName": "ask-pro"
+  },
+  "plugins": [
+    {
+      "name": "ask-pro",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/JJLiebig/ask-pro.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

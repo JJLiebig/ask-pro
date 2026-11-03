@@ -51,7 +51,10 @@
     "dist/src/browser/providers/chatgptDomProvider.js",
     "dist/src/browserMode.js",
     "dist/src/version.js",
+    ".codex-plugin/plugin.json",
+    "assets/ask-pro_logo.png",
     "SKILL.md",
+    "skills/ask-pro/SKILL.md",
     "README.md",
     "LICENSE"
   ],

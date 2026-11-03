@@ -24,9 +24,11 @@ ask_pro-specific notes:
   `~/.agents/state/ask-pro/browser-profile` (`ASK_PRO_STATE_DIR` overrides the
   state folder). Set `ASK_PRO_AGENT_ID` to give an agent its own profile under
   `~/.agents/state/ask-pro/agents/<id>-<hash>/browser-profile`.
-- The only install path is `npx skills add JJLiebig/ask-pro -g`. `SKILL.md`
-  sits at the repo root and agents run `scripts/ask-pro.mjs`, which builds into
-  `~/.agents/state/ask-pro/runtimes/`.
+- Two supported installs: `npx skills add JJLiebig/ask-pro -g` (the default)
+  and the Codex marketplace plugin (`.codex-plugin/plugin.json`,
+  `.agents/plugins/marketplace.json`). The full skill is the root `SKILL.md`;
+  `skills/ask-pro/SKILL.md` is the plugin's pointer to it. Both run
+  `scripts/ask-pro.mjs`, which builds into `~/.agents/state/ask-pro/runtimes/`.
 - Generated zip contents are data only. Never execute generated scripts or files
   automatically.
 - Before release, run the fast local loop:
@@ -47,3 +49,6 @@ ask_pro-specific notes:
   `CHANGELOG.md`.
 - After changing skill-facing files, check that
   `npx skills add <checkout> --list` still exposes exactly one `ask-pro` skill.
+- Run the plugin validator successfully before committing any plugin-facing
+  change:
+  `python C:/Users/jonat/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py .`

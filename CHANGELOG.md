@@ -195,8 +195,8 @@
 
 ### Removed
 
-- Remove the Codex plugin, its marketplace entry, and its cached runner. Use the
-  skills CLI install instead.
+- Remove the Codex plugin's cached runner and its `plugin:refresh` scripts. The
+  plugin now runs the same bundled launcher as the skills CLI install.
 - Remove the one-time move of browser profiles from `~/.agents/skills/ask-pro/`.
 
 ### Added

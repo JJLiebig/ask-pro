@@ -10,7 +10,8 @@ Read this when working on `ask_pro` from Windows and add new findings here.
   Normal and concurrent agents use this shared profile without configuration.
   Set `ASK_PRO_AGENT_ID` only for an explicitly isolated agent profile under
   `...\state\ask-pro\agents\<id>-<hash>\browser-profile`.
-- `npx skills add` installs the whole repo as the skill. Its launcher,
+- `npx skills add` and the Codex marketplace plugin both install the whole
+  repo. Its launcher,
   `scripts\ask-pro.mjs`, installs, builds, and executes under
   `...\state\ask-pro\runtimes\<install>\<version>-<hash>\`, never in the
   installed skill folder. Each installed skill folder has its own `<install>`

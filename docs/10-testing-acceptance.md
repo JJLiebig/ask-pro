@@ -89,7 +89,8 @@ V1 is done when all are true:
 
 - `ask-pro` binary exists.
 - `$ask-pro` skill exists at the repo root as `SKILL.md`, installable with
-  `npx skills add JJLiebig/ask-pro -g`.
+  `npx skills add JJLiebig/ask-pro -g` or as the Codex marketplace plugin, whose
+  `skills/ask-pro/SKILL.md` points to it.
 - Normal path requires no preset/model flags.
 - Local/session naming uses project `.ask-pro/` sessions and persistent browser
   profiles under `~/.agents/state/ask-pro/`.
