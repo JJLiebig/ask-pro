@@ -61,7 +61,9 @@ async function ensureRuntime() {
   }
   const parent = installRoot;
   fs.mkdirSync(parent, { recursive: true });
-  fs.writeFileSync(path.join(parent, SOURCE_FILE), sourceRoot);
+  const sourceFile = path.join(parent, SOURCE_FILE);
+  // Rewriting truncates the file briefly; another launch could then read it as empty.
+  if (readText(sourceFile) !== sourceRoot) fs.writeFileSync(sourceFile, sourceRoot);
   pruneBuilds(parent, null);
   const staging = path.join(parent, `.staging-${process.pid}-${randomUUID()}`);
   try {
@@ -187,14 +189,22 @@ function pruneUninstalled() {
         remove(root);
         continue;
       }
-      const source = fs.readFileSync(path.join(root, SOURCE_FILE), "utf8");
-      if (fs.existsSync(path.join(source, LAUNCHER))) continue;
+      const source = readText(path.join(root, SOURCE_FILE));
+      if (!source || fs.existsSync(path.join(source, LAUNCHER))) continue;
       const builds = directories(root).map((name) => path.join(root, name));
       if (builds.some((build) => hasLiveLease(build) || hasLiveBuilder(build))) continue;
       retire(runtimesRoot, root);
     } catch {
       // best effort; retried on a later run
     }
+  }
+}
+
+function readText(file) {
+  try {
+    return fs.readFileSync(file, "utf8");
+  } catch {
+    return "";
   }
 }
 
