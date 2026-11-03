@@ -30,7 +30,8 @@ type LauncherOutput = {
 // An installed skill folder: the launcher plus the package files it bootstraps from. A prebuilt
 // stand-in CLI keeps the test off the real build while still resolving installed dependencies.
 async function installSkill(prefix: string) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  // Real path: Node reports the launcher and CLI by real path (macOS temp folders are symlinked).
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
   tempDirs.push(root);
   const skillRoot = path.join(root, "skill");
   const projectCwd = path.join(root, "project");
