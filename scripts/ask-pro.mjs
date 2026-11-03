@@ -102,12 +102,13 @@ async function ensureRuntime() {
         fs.renameSync(staging, target);
         break;
       } catch (error) {
-        if ((await waitForRuntime(target)) && claim(target)) {
+        const existed = fs.existsSync(target);
+        if (existed && (await waitForRuntime(target)) && claim(target)) {
           fs.rmSync(staging, { recursive: true, force: true });
           return target;
         }
-        // Retry while cleanup is deciding on the build, or once it has removed it.
-        if (fs.existsSync(target) && !isRetiring(target)) throw error;
+        // Retry only while cleanup is deciding on that build, or once it has removed it.
+        if (!existed || (fs.existsSync(target) && !isRetiring(target))) throw error;
       }
     }
     const marker = path.join(target, BUILDING_MARKER);
@@ -188,10 +189,14 @@ function pruneBuilds(parent, keep) {
       if (entry.startsWith(".")) continue;
       const ready = path.join(root, READY_MARKER);
       if (!fs.existsSync(ready)) {
-        // Recheck readiness: a build that finished after the first check has no builder marker.
-        if (!hasLiveBuilder(root) && !isRetiring(root) && !fs.existsSync(ready)) {
-          retire(parent, root);
+        if (hasLiveBuilder(root) || isRetiring(root)) continue;
+        // An interrupted retirement: keep the build, so its leases are checked again next time.
+        if (fs.existsSync(path.join(root, RETIRING_MARKER))) {
+          restoreReady(root);
+          continue;
         }
+        // Recheck readiness: a build that finished after the first check has no builder marker.
+        if (!fs.existsSync(ready)) retire(parent, root);
         continue;
       }
       if (keep) retireUnleased(parent, root);
@@ -248,16 +253,21 @@ function retireUnleased(parent, root) {
   const ready = path.join(root, READY_MARKER);
   const retiring = path.join(root, RETIRING_MARKER);
   try {
+    // Freshen the marker first, so the retirement never looks interrupted to other launchers.
+    fs.utimesSync(ready, new Date(), new Date());
     fs.renameSync(ready, retiring);
-    fs.utimesSync(retiring, new Date(), new Date());
   } catch {
     return;
   }
   if (!hasLiveLease(root) && retire(parent, root)) return;
+  restoreReady(root);
+}
+
+function restoreReady(root) {
   try {
-    fs.renameSync(retiring, ready);
+    fs.renameSync(path.join(root, RETIRING_MARKER), path.join(root, READY_MARKER));
   } catch {
-    // an interrupted retirement is removed on a later run
+    // retried on a later run
   }
 }
 
