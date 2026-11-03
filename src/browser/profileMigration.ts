@@ -38,7 +38,11 @@ export async function migrateLegacyAskProProfiles(options: MigrationOptions = {}
     if (profiles.length === 0) return;
     if (await someMissing(profiles.map((profile) => profile.target))) {
       await withMigrationLock(stateDir, async () => {
+        // Only the newest old copy of each profile moves, even if it must wait for a later run.
+        const claimed = new Set<string>();
         for (const profile of profiles) {
+          if (claimed.has(profile.target)) continue;
+          claimed.add(profile.target);
           if (!(await exists(profile.target))) await moveProfile(profile, stateDir);
         }
       });

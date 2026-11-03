@@ -153,6 +153,8 @@ describe("browser profile migration", () => {
     const t = await setup();
     const old = t.profile(t.codexState);
     await t.writeProfile(old, "old");
+    // An even older copy must not take the busy profile's place.
+    await t.writeProfile(t.profile(t.skillFolder), "oldest");
     const holder = await holdProcess();
     try {
       await fs.writeFile(
@@ -169,6 +171,7 @@ describe("browser profile migration", () => {
     expect(await t.run()).toBe(t.profile(t.state));
     expect(await t.readMarker(t.profile(t.state))).toBe("old");
     expect(await exists(old)).toBe(false);
+    expect(await t.readMarker(t.profile(t.skillFolder))).toBe("oldest");
   }, 30_000);
 
   test.runIf(process.platform === "win32")(
