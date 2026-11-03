@@ -35,7 +35,7 @@ ask_pro
   session: 2026-05-01-billing-webhook
   state: needs_auth
   reason: login_page_detected
-  profile: ~/.agents/state/ask-pro/browser-profile
+  profile: ~/.codex/state/ask-pro/browser-profile
   action: human_login_then_resume
   resume: "ask-pro --resume 2026-05-01-billing-webhook"
 ```
@@ -74,9 +74,9 @@ Resume may reattach to saved browser runtime metadata when a session already
 has it.
 
 1. persistent automation profile at
-   `~/.agents/state/ask-pro/browser-profile`
+   `$CODEX_HOME/state/ask-pro/browser-profile`
    for default runs, or
-   `~/.agents/state/ask-pro/agents/<id>-<hash>/browser-profile` when
+   `$CODEX_HOME/state/ask-pro/agents/<id>-<hash>/browser-profile` when
    `ASK_PRO_AGENT_ID` is set
 2. headful manual-login browser
 3. headless only after auth has been verified
@@ -86,5 +86,9 @@ Generic browser automation may attach to a user-approved running Chrome, but
 
 Headless is an optimization, not the auth bootstrap path.
 
-`ASK_PRO_STATE_DIR` overrides `~/.agents/state/ask-pro/`. Resume rejects
-profile paths outside the state folder.
+`CODEX_HOME` defaults to `~/.codex`. On first use, ask-pro moves the exact
+inactive legacy profile from `~/.agents/skills/ask-pro/` to the matching state
+path. It never reads auth contents during migration, merges profiles, or moves
+a profile with a live ask-pro lock, Chrome pid, or DevTools endpoint. Resume
+metadata naming the exact legacy profile is migrated and rewritten; unrelated
+profile paths remain rejected.

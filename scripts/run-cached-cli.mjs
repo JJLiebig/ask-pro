@@ -9,25 +9,15 @@ import { fileURLToPath } from "node:url";
 const rawArgs = process.argv.slice(2);
 const args = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
 const sourceScript = fileURLToPath(import.meta.url);
-const sourceRoot = fs.realpathSync(path.resolve(path.dirname(sourceScript), ".."));
+const sourceRoot = path.resolve(path.dirname(sourceScript), "..");
 const projectCwd = process.cwd();
-const stateRoot = process.env.ASK_PRO_STATE_DIR?.trim()
-  ? path.resolve(process.env.ASK_PRO_STATE_DIR.trim())
-  : path.join(os.homedir(), ".agents", "state", "ask-pro");
-const runtimesRoot = path.join(stateRoot, "runtimes");
-// Builds are grouped per installed skill folder: separate installs never remove each other's
-// builds, and only an update of this install replaces the build it uses.
-const installRoot = path.join(runtimesRoot, installKey(sourceRoot));
-const SOURCE_FILE = ".source";
-const LAUNCHER = path.join("scripts", "ask-pro.mjs");
-const READY_MARKER = ".ask-pro-runtime-ready";
+const codexHome = path.resolve(process.env.CODEX_HOME?.trim() || path.join(os.homedir(), ".codex"));
 const BUILDING_MARKER = ".ask-pro-runtime-building";
 const BUILD_HEARTBEAT_STALE_MS = 30_000;
-const STAGING_STALE_MS = 24 * 60 * 60 * 1000;
 const runtimeRoot = await ensureRuntime();
 const cliEntry = path.join(runtimeRoot, "dist", "bin", "ask-pro-cli.js");
 const launcher = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(sourceScript)} --`;
-const leases = [leasePath(runtimeRoot, process.pid)];
+const lease = path.join(runtimeRoot, `.active-${process.pid}.json`);
 
 try {
   process.exitCode = await run(
@@ -37,34 +27,27 @@ try {
       cwd: projectCwd,
       env: {
         ...process.env,
+        CODEX_HOME: codexHome,
         INIT_CWD: projectCwd,
         ASK_PRO_SOURCE_CHECKOUT_LAUNCHER: launcher,
       },
     },
     true,
-    (child) => {
-      const childLease = leasePath(runtimeRoot, child.pid);
-      fs.writeFileSync(childLease, JSON.stringify({ pid: child.pid }));
-      leases.push(childLease);
-      pruneBuilds(installRoot, runtimeRoot);
-      pruneUninstalled();
-    },
+    (child) => fs.writeFileSync(lease, JSON.stringify({ pid: child.pid })),
   );
 } finally {
-  for (const lease of leases) fs.rmSync(lease, { force: true });
+  fs.rmSync(lease, { force: true });
 }
 
 async function ensureRuntime() {
   const packageJsonPath = path.join(sourceRoot, "package.json");
   if (!fs.existsSync(packageJsonPath)) {
-    throw new Error(`ask-pro skill folder is missing package.json at ${packageJsonPath}`);
+    throw new Error(`ask-pro plugin cache is missing package.json at ${packageJsonPath}`);
   }
-  const parent = installRoot;
+  const parent = path.join(codexHome, "plugin-runtimes", "ask-pro");
   fs.mkdirSync(parent, { recursive: true });
-  const sourceFile = path.join(parent, SOURCE_FILE);
-  // Rewriting truncates the file briefly; another launch could then read it as empty.
-  if (readText(sourceFile) !== sourceRoot) fs.writeFileSync(sourceFile, sourceRoot);
-  pruneBuilds(parent, null);
+  pruneStaging(parent);
+  pruneRuntimes(parent, null, true);
   const staging = path.join(parent, `.staging-${process.pid}-${randomUUID()}`);
   try {
     fs.cpSync(sourceRoot, staging, {
@@ -75,9 +58,12 @@ async function ensureRuntime() {
     const contentHash = hashSource(staging);
     const version = safeKeyPart(packageJson.version || "0.0.0");
     const target = path.join(parent, `${version}-${contentHash.slice(0, 16)}`);
-    const ready = path.join(target, READY_MARKER);
-    if (fs.existsSync(ready) && claim(target)) {
+    const ready = path.join(target, ".ask-pro-runtime-ready");
+    if (fs.existsSync(ready)) {
       fs.rmSync(staging, { recursive: true, force: true });
+      fs.rmSync(path.join(target, BUILDING_MARKER), { force: true });
+      fs.utimesSync(ready, new Date(), new Date());
+      pruneRuntimes(parent, target);
       return target;
     }
     fs.writeFileSync(
@@ -88,7 +74,9 @@ async function ensureRuntime() {
       fs.renameSync(staging, target);
     } catch (error) {
       fs.rmSync(staging, { recursive: true, force: true });
-      if (!(await waitForRuntime(target)) || !claim(target)) throw error;
+      if (!(await waitForRuntime(target))) throw error;
+      fs.utimesSync(ready, new Date(), new Date());
+      pruneRuntimes(parent, target);
       return target;
     }
     const marker = path.join(target, BUILDING_MARKER);
@@ -102,7 +90,6 @@ async function ensureRuntime() {
     heartbeat.unref();
     try {
       await bootstrap(target, packageJson);
-      fs.writeFileSync(leasePath(target, process.pid), JSON.stringify({ pid: process.pid }));
       fs.writeFileSync(ready, `${JSON.stringify({ version, contentHash }, null, 2)}\n`);
       fs.rmSync(marker, { force: true });
     } catch (error) {
@@ -111,6 +98,7 @@ async function ensureRuntime() {
     } finally {
       clearInterval(heartbeat);
     }
+    pruneRuntimes(parent, target);
     return target;
   } catch (error) {
     fs.rmSync(staging, { recursive: true, force: true });
@@ -118,30 +106,8 @@ async function ensureRuntime() {
   }
 }
 
-function installKey(root) {
-  const key = process.platform === "win32" ? root.toLowerCase() : root;
-  return createHash("sha256").update(key).digest("hex").slice(0, 16);
-}
-
-// Leases the build for this launcher, then confirms cleanup did not retire it first.
-function claim(target) {
-  const lease = leasePath(target, process.pid);
-  try {
-    fs.writeFileSync(lease, JSON.stringify({ pid: process.pid }));
-  } catch {
-    return false;
-  }
-  if (fs.existsSync(path.join(target, READY_MARKER))) return true;
-  fs.rmSync(lease, { force: true });
-  return false;
-}
-
-function leasePath(root, pid) {
-  return path.join(root, `.active-${pid}.json`);
-}
-
 async function waitForRuntime(target) {
-  const ready = path.join(target, READY_MARKER);
+  const ready = path.join(target, ".ask-pro-runtime-ready");
   while (!fs.existsSync(ready)) {
     if (!hasLiveBuilder(target) && !fs.existsSync(ready)) return false;
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -149,92 +115,42 @@ async function waitForRuntime(target) {
   return true;
 }
 
-// Removes this install's leftover builds. With `keep`, every other finished build goes too,
-// unless a running ask-pro still leases it. A folder that cannot be moved (on Windows, a process
-// still has it open) is skipped and retried on a later run. Cleanup never fails the current run.
-function pruneBuilds(parent, keep) {
-  for (const entry of directories(parent)) {
-    const root = path.join(parent, entry);
+function pruneStaging(parent) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith(".staging-")) continue;
+    const root = path.join(parent, entry.name);
     try {
-      if (root === keep) continue;
-      if (entry.startsWith(".trash-")) {
-        remove(root);
-        continue;
-      }
-      if (entry.startsWith(".staging-")) {
-        if (fs.statSync(root).mtimeMs < Date.now() - STAGING_STALE_MS) retire(parent, root);
-        continue;
-      }
-      if (entry.startsWith(".")) continue;
-      const ready = path.join(root, READY_MARKER);
+      if (fs.statSync(root).mtimeMs < cutoff) fs.rmSync(root, { recursive: true, force: true });
+    } catch {
+      // best effort
+    }
+  }
+}
+
+function pruneRuntimes(parent, keep, incompleteOnly = false) {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const root = path.join(parent, entry.name);
+    const ready = path.join(root, ".ask-pro-runtime-ready");
+    if (root === keep) continue;
+    try {
+      if (entry.name.startsWith(".staging-")) continue;
       if (!fs.existsSync(ready)) {
-        // Recheck readiness: a build that finished after the first check has no builder marker.
-        if (!hasLiveBuilder(root) && !fs.existsSync(ready)) retire(parent, root);
+        if (!hasLiveBuilder(root) && !fs.existsSync(ready)) {
+          fs.rmSync(root, { recursive: true, force: true });
+        }
         continue;
       }
-      if (keep && !hasLiveLease(root)) retire(parent, root);
-    } catch {
-      // best effort; retried on a later run
-    }
-  }
-}
-
-// Removes the builds of skill folders that no longer exist, once none of them is running.
-function pruneUninstalled() {
-  for (const entry of directories(runtimesRoot)) {
-    const root = path.join(runtimesRoot, entry);
-    try {
-      if (root === installRoot) continue;
-      if (entry.startsWith(".trash-")) {
-        remove(root);
+      if (incompleteOnly) continue;
+      if (fs.statSync(ready).mtimeMs >= cutoff || hasLiveLease(root)) {
         continue;
       }
-      const source = readText(path.join(root, SOURCE_FILE));
-      if (!source || fs.existsSync(path.join(source, LAUNCHER))) continue;
-      const builds = directories(root).map((name) => path.join(root, name));
-      if (builds.some((build) => hasLiveLease(build) || hasLiveBuilder(build))) continue;
-      retire(runtimesRoot, root);
+      fs.rmSync(root, { recursive: true, force: true });
     } catch {
-      // best effort; retried on a later run
+      // best-effort cleanup must not block the selected runtime
     }
-  }
-}
-
-function readText(file) {
-  try {
-    return fs.readFileSync(file, "utf8");
-  } catch {
-    return "";
-  }
-}
-
-function directories(parent) {
-  try {
-    return fs
-      .readdirSync(parent, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name);
-  } catch {
-    return [];
-  }
-}
-
-// Moves the folder aside in one step so a partly deleted build is never left behind.
-function retire(parent, root) {
-  const trash = path.join(parent, `.trash-${randomUUID()}`);
-  try {
-    fs.renameSync(root, trash);
-  } catch {
-    return;
-  }
-  remove(trash);
-}
-
-function remove(root) {
-  try {
-    fs.rmSync(root, { recursive: true, force: true });
-  } catch {
-    // leftovers are removed on a later run
   }
 }
 
@@ -289,7 +205,7 @@ async function bootstrap(root, packageJson) {
     Object.keys(packageJson.dependencies || {}).length > 0 ||
     Object.keys(packageJson.optionalDependencies || {}).length > 0;
   if (needsInstall) {
-    console.error("[ask-pro] Preparing first run after install or update.");
+    console.error("[ask-pro] preparing immutable plugin runtime.");
     await runNpm(
       [
         "exec",
@@ -353,9 +269,7 @@ function quoteCommandPart(value) {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
-// Setup output goes to stderr so stdout carries only the CLI's own output.
 function runNpm(args, cwd) {
-  const options = { cwd, env: process.env, stdio: ["ignore", 2, 2] };
   const npmCli = path.join(
     path.dirname(process.execPath),
     "node_modules",
@@ -364,13 +278,13 @@ function runNpm(args, cwd) {
     "npm-cli.js",
   );
   if (fs.existsSync(npmCli)) {
-    return run(process.execPath, [npmCli, ...args], options);
+    return run(process.execPath, [npmCli, ...args], { cwd, env: process.env });
   }
-  return run("npm", args, { ...options, shell: process.platform === "win32" });
+  return run("npm", args, { cwd, env: process.env, shell: process.platform === "win32" });
 }
 
 function run(command, args, options, allowNonzero = false, onSpawn) {
-  const child = spawn(command, args, { stdio: "inherit", ...options });
+  const child = spawn(command, args, { ...options, stdio: "inherit" });
   onSpawn?.(child);
   return new Promise((resolve, reject) => {
     child.on("error", reject);

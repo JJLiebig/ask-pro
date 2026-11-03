@@ -12,10 +12,8 @@
   managed browser, and a resumable handoff. Request read-only repository evidence
   and citations while retaining local-file context. The flag does not restrict
   the GitHub plugin's actual permissions.
-- Install ask-pro with `npx skills add JJLiebig/ask-pro -g` for Codex, Claude
-  Code, and other agents the skills CLI supports. The skill contains ask-pro
-  itself: its first run installs dependencies and builds, with no global CLI
-  install. `npx skills update` updates it.
+- Add skills CLI installation for Codex and other supported agents using the
+  standalone `ask-pro` npm CLI.
 - Publish `ask-pro` to npm after each passing main-branch CI run.
 
 ### Fixed
@@ -82,15 +80,6 @@
   another run's in-flight browser, and transfer shutdown to the last live run.
 
 ### Changed
-
-- Move all ask-pro state to `~/.agents/state/ask-pro/`, overridable with
-  `ASK_PRO_STATE_DIR`. There is no automatic migration: to keep a signed-in
-  Codex plugin profile, copy `~/.codex/state/ask-pro` to
-  `~/.agents/state/ask-pro` once before the first run (see the README).
-- After an update, remove the skill's previous builds once the new one runs, and
-  the builds of uninstalled skill folders. Builds that a running ask-pro still
-  uses, or that Windows keeps locked, are retried later. Separate installs keep
-  their own builds.
 
 - Refresh package, pnpm, and CI action versions, and enforce the seven-day
   package-age and dependency-build policies through `pnpm-workspace.yaml`.
@@ -192,12 +181,6 @@
   ask-pro test gate.
 - Clarify manual recovery copy so user-facing hints name only `--copy` for
   answer-bearing copy targets and `--harvest` for raw answers.
-
-### Removed
-
-- Remove the Codex plugin's cached runner and its `plugin:refresh` scripts. The
-  plugin now runs the same bundled launcher as the skills CLI install.
-- Remove the one-time move of browser profiles from `~/.agents/skills/ask-pro/`.
 
 ### Added
 
