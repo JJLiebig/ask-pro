@@ -19,6 +19,9 @@ const READY_MARKER = ".ask-pro-runtime-ready";
 const BUILDING_MARKER = ".ask-pro-runtime-building";
 const BUILD_HEARTBEAT_STALE_MS = 30_000;
 const STAGING_STALE_MS = 24 * 60 * 60 * 1000;
+const LOCK_WAIT_MS = 10_000;
+const LOCK_STALE_MS = 60_000;
+const sleepCell = new Int32Array(new SharedArrayBuffer(4));
 const runtimeRoot = await ensureRuntime();
 const cliEntry = path.join(runtimeRoot, "dist", "bin", "ask-pro-cli.js");
 const launcher = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(sourceScript)} --`;
@@ -109,17 +112,49 @@ async function ensureRuntime() {
   }
 }
 
-// Leases the build for this launcher, then confirms a concurrent cleanup did not remove it first.
+// Leases the build for this launcher. Holding the runtimes lock keeps cleanup from retiring the
+// build between the lease and the readiness check.
 function claim(target) {
-  const lease = leasePath(target, process.pid);
-  try {
-    fs.writeFileSync(lease, JSON.stringify({ pid: process.pid }));
-  } catch {
+  return withRuntimesLock(() => {
+    const lease = leasePath(target, process.pid);
+    try {
+      fs.writeFileSync(lease, JSON.stringify({ pid: process.pid }));
+    } catch {
+      return false;
+    }
+    if (fs.existsSync(path.join(target, READY_MARKER))) return true;
+    fs.rmSync(lease, { force: true });
     return false;
+  });
+}
+
+// A short exclusive lock shared by claiming and retiring builds; both hold it for milliseconds. A
+// lock left by a dead or long-gone process is replaced. If the lock stays busy, `fn` runs with
+// `locked` false rather than blocking the run.
+function withRuntimesLock(fn) {
+  const lock = path.join(runtimesRoot, ".lock");
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      fs.writeFileSync(lock, String(process.pid), { flag: "wx" });
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST" || Date.now() > deadline) return fn(false);
+    }
+    try {
+      const owner = Number(fs.readFileSync(lock, "utf8"));
+      const abandoned = Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS;
+      if ((owner > 0 && !isProcessAlive(owner)) || abandoned) fs.rmSync(lock, { force: true });
+    } catch {
+      // the owner just released it
+    }
+    Atomics.wait(sleepCell, 0, 0, 20);
   }
-  if (fs.existsSync(path.join(target, READY_MARKER))) return true;
-  fs.rmSync(lease, { force: true });
-  return false;
+  try {
+    return fn(true);
+  } finally {
+    fs.rmSync(lock, { force: true });
+  }
 }
 
 function leasePath(root, pid) {
@@ -139,49 +174,60 @@ async function waitForRuntime(target) {
 // ask-pro still leases it. A folder that cannot be moved (on Windows, a process still has it
 // open) is skipped and retried on a later run. Cleanup never fails the current run.
 function pruneRuntimes(parent, keep) {
-  let entries;
-  try {
-    entries = fs.readdirSync(parent, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const root = path.join(parent, entry.name);
+  const trash = withRuntimesLock((locked) => {
+    if (!locked) return [];
+    const retired = [];
+    let entries;
     try {
-      if (root === keep) continue;
-      if (entry.name.startsWith(".trash-")) {
-        fs.rmSync(root, { recursive: true, force: true });
-        continue;
-      }
-      if (entry.name.startsWith(".staging-")) {
-        if (fs.statSync(root).mtimeMs < Date.now() - STAGING_STALE_MS) discard(parent, root);
-        continue;
-      }
-      if (entry.name.startsWith(".")) continue;
-      if (!fs.existsSync(path.join(root, READY_MARKER))) {
-        if (!hasLiveBuilder(root)) discard(parent, root);
-        continue;
-      }
-      if (keep && !hasLiveLease(root)) discard(parent, root);
+      entries = fs.readdirSync(parent, { withFileTypes: true });
     } catch {
-      // best effort; retried on a later run
+      return retired;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const root = path.join(parent, entry.name);
+      try {
+        if (root === keep) continue;
+        if (entry.name.startsWith(".trash-")) {
+          retired.push(root);
+          continue;
+        }
+        if (entry.name.startsWith(".staging-")) {
+          if (fs.statSync(root).mtimeMs < Date.now() - STAGING_STALE_MS)
+            retire(parent, root, retired);
+          continue;
+        }
+        if (entry.name.startsWith(".")) continue;
+        const ready = path.join(root, READY_MARKER);
+        if (!fs.existsSync(ready)) {
+          // Recheck readiness: a build that finished after the first check has no builder marker.
+          if (!hasLiveBuilder(root) && !fs.existsSync(ready)) retire(parent, root, retired);
+          continue;
+        }
+        if (keep && !hasLiveLease(root)) retire(parent, root, retired);
+      } catch {
+        // best effort; retried on a later run
+      }
+    }
+    return retired;
+  });
+  for (const root of trash) {
+    try {
+      fs.rmSync(root, { recursive: true, force: true });
+    } catch {
+      // leftovers are removed on a later run
     }
   }
 }
 
 // Moves the folder aside in one step so a partly deleted build is never left behind.
-function discard(parent, root) {
+function retire(parent, root, retired) {
   const trash = path.join(parent, `.trash-${randomUUID()}`);
   try {
     fs.renameSync(root, trash);
+    retired.push(trash);
   } catch {
-    return;
-  }
-  try {
-    fs.rmSync(trash, { recursive: true, force: true });
-  } catch {
-    // leftovers are removed on a later run
+    // still in use; retried on a later run
   }
 }
 
