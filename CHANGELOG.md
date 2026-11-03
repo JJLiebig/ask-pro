@@ -87,8 +87,10 @@
   `ASK_PRO_STATE_DIR`. There is no automatic migration: to keep a signed-in
   Codex plugin profile, copy `~/.codex/state/ask-pro` to
   `~/.agents/state/ask-pro` once before the first run (see the README).
-- After an update, remove previous builds once the new one runs. Builds that a
-  running ask-pro still uses, or that Windows keeps locked, are retried later.
+- After an update, remove the skill's previous builds once the new one runs, and
+  the builds of uninstalled skill folders. Builds that a running ask-pro still
+  uses, or that Windows keeps locked, are retried later. Separate installs keep
+  their own builds.
 
 - Refresh package, pnpm, and CI action versions, and enforce the seven-day
   package-age and dependency-build policies through `pnpm-workspace.yaml`.

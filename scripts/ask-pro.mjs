@@ -9,19 +9,21 @@ import { fileURLToPath } from "node:url";
 const rawArgs = process.argv.slice(2);
 const args = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
 const sourceScript = fileURLToPath(import.meta.url);
-const sourceRoot = path.resolve(path.dirname(sourceScript), "..");
+const sourceRoot = fs.realpathSync(path.resolve(path.dirname(sourceScript), ".."));
 const projectCwd = process.cwd();
 const stateRoot = process.env.ASK_PRO_STATE_DIR?.trim()
   ? path.resolve(process.env.ASK_PRO_STATE_DIR.trim())
   : path.join(os.homedir(), ".agents", "state", "ask-pro");
 const runtimesRoot = path.join(stateRoot, "runtimes");
+// Builds are grouped per installed skill folder: separate installs never remove each other's
+// builds, and only an update of this install replaces the build it uses.
+const installRoot = path.join(runtimesRoot, installKey(sourceRoot));
+const SOURCE_FILE = ".source";
+const LAUNCHER = path.join("scripts", "ask-pro.mjs");
 const READY_MARKER = ".ask-pro-runtime-ready";
 const BUILDING_MARKER = ".ask-pro-runtime-building";
 const BUILD_HEARTBEAT_STALE_MS = 30_000;
 const STAGING_STALE_MS = 24 * 60 * 60 * 1000;
-const LOCK_WAIT_MS = 10_000;
-const LOCK_STALE_MS = 60_000;
-const sleepCell = new Int32Array(new SharedArrayBuffer(4));
 const runtimeRoot = await ensureRuntime();
 const cliEntry = path.join(runtimeRoot, "dist", "bin", "ask-pro-cli.js");
 const launcher = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(sourceScript)} --`;
@@ -44,7 +46,8 @@ try {
       const childLease = leasePath(runtimeRoot, child.pid);
       fs.writeFileSync(childLease, JSON.stringify({ pid: child.pid }));
       leases.push(childLease);
-      pruneRuntimes(runtimesRoot, runtimeRoot);
+      pruneBuilds(installRoot, runtimeRoot);
+      pruneUninstalled();
     },
   );
 } finally {
@@ -56,9 +59,10 @@ async function ensureRuntime() {
   if (!fs.existsSync(packageJsonPath)) {
     throw new Error(`ask-pro skill folder is missing package.json at ${packageJsonPath}`);
   }
-  const parent = runtimesRoot;
+  const parent = installRoot;
   fs.mkdirSync(parent, { recursive: true });
-  pruneRuntimes(parent, null);
+  fs.writeFileSync(path.join(parent, SOURCE_FILE), sourceRoot);
+  pruneBuilds(parent, null);
   const staging = path.join(parent, `.staging-${process.pid}-${randomUUID()}`);
   try {
     fs.cpSync(sourceRoot, staging, {
@@ -112,49 +116,22 @@ async function ensureRuntime() {
   }
 }
 
-// Leases the build for this launcher. Holding the runtimes lock keeps cleanup from retiring the
-// build between the lease and the readiness check.
-function claim(target) {
-  return withRuntimesLock(() => {
-    const lease = leasePath(target, process.pid);
-    try {
-      fs.writeFileSync(lease, JSON.stringify({ pid: process.pid }));
-    } catch {
-      return false;
-    }
-    if (fs.existsSync(path.join(target, READY_MARKER))) return true;
-    fs.rmSync(lease, { force: true });
-    return false;
-  });
+function installKey(root) {
+  const key = process.platform === "win32" ? root.toLowerCase() : root;
+  return createHash("sha256").update(key).digest("hex").slice(0, 16);
 }
 
-// A short exclusive lock shared by claiming and retiring builds; both hold it for milliseconds. A
-// lock left by a dead or long-gone process is replaced. If the lock stays busy, `fn` runs with
-// `locked` false rather than blocking the run.
-function withRuntimesLock(fn) {
-  const lock = path.join(runtimesRoot, ".lock");
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      fs.writeFileSync(lock, String(process.pid), { flag: "wx" });
-      break;
-    } catch (error) {
-      if (error?.code !== "EEXIST" || Date.now() > deadline) return fn(false);
-    }
-    try {
-      const owner = Number(fs.readFileSync(lock, "utf8"));
-      const abandoned = Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS;
-      if ((owner > 0 && !isProcessAlive(owner)) || abandoned) fs.rmSync(lock, { force: true });
-    } catch {
-      // the owner just released it
-    }
-    Atomics.wait(sleepCell, 0, 0, 20);
-  }
+// Leases the build for this launcher, then confirms cleanup did not retire it first.
+function claim(target) {
+  const lease = leasePath(target, process.pid);
   try {
-    return fn(true);
-  } finally {
-    fs.rmSync(lock, { force: true });
+    fs.writeFileSync(lease, JSON.stringify({ pid: process.pid }));
+  } catch {
+    return false;
   }
+  if (fs.existsSync(path.join(target, READY_MARKER))) return true;
+  fs.rmSync(lease, { force: true });
+  return false;
 }
 
 function leasePath(root, pid) {
@@ -170,64 +147,84 @@ async function waitForRuntime(target) {
   return true;
 }
 
-// Removes leftover builds. With `keep`, every other finished build goes too, unless a running
-// ask-pro still leases it. A folder that cannot be moved (on Windows, a process still has it
-// open) is skipped and retried on a later run. Cleanup never fails the current run.
-function pruneRuntimes(parent, keep) {
-  const trash = withRuntimesLock((locked) => {
-    if (!locked) return [];
-    const retired = [];
-    let entries;
+// Removes this install's leftover builds. With `keep`, every other finished build goes too,
+// unless a running ask-pro still leases it. A folder that cannot be moved (on Windows, a process
+// still has it open) is skipped and retried on a later run. Cleanup never fails the current run.
+function pruneBuilds(parent, keep) {
+  for (const entry of directories(parent)) {
+    const root = path.join(parent, entry);
     try {
-      entries = fs.readdirSync(parent, { withFileTypes: true });
-    } catch {
-      return retired;
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const root = path.join(parent, entry.name);
-      try {
-        if (root === keep) continue;
-        if (entry.name.startsWith(".trash-")) {
-          retired.push(root);
-          continue;
-        }
-        if (entry.name.startsWith(".staging-")) {
-          if (fs.statSync(root).mtimeMs < Date.now() - STAGING_STALE_MS)
-            retire(parent, root, retired);
-          continue;
-        }
-        if (entry.name.startsWith(".")) continue;
-        const ready = path.join(root, READY_MARKER);
-        if (!fs.existsSync(ready)) {
-          // Recheck readiness: a build that finished after the first check has no builder marker.
-          if (!hasLiveBuilder(root) && !fs.existsSync(ready)) retire(parent, root, retired);
-          continue;
-        }
-        if (keep && !hasLiveLease(root)) retire(parent, root, retired);
-      } catch {
-        // best effort; retried on a later run
+      if (root === keep) continue;
+      if (entry.startsWith(".trash-")) {
+        remove(root);
+        continue;
       }
-    }
-    return retired;
-  });
-  for (const root of trash) {
-    try {
-      fs.rmSync(root, { recursive: true, force: true });
+      if (entry.startsWith(".staging-")) {
+        if (fs.statSync(root).mtimeMs < Date.now() - STAGING_STALE_MS) retire(parent, root);
+        continue;
+      }
+      if (entry.startsWith(".")) continue;
+      const ready = path.join(root, READY_MARKER);
+      if (!fs.existsSync(ready)) {
+        // Recheck readiness: a build that finished after the first check has no builder marker.
+        if (!hasLiveBuilder(root) && !fs.existsSync(ready)) retire(parent, root);
+        continue;
+      }
+      if (keep && !hasLiveLease(root)) retire(parent, root);
     } catch {
-      // leftovers are removed on a later run
+      // best effort; retried on a later run
     }
   }
 }
 
+// Removes the builds of skill folders that no longer exist, once none of them is running.
+function pruneUninstalled() {
+  for (const entry of directories(runtimesRoot)) {
+    const root = path.join(runtimesRoot, entry);
+    try {
+      if (root === installRoot) continue;
+      if (entry.startsWith(".trash-")) {
+        remove(root);
+        continue;
+      }
+      const source = fs.readFileSync(path.join(root, SOURCE_FILE), "utf8");
+      if (fs.existsSync(path.join(source, LAUNCHER))) continue;
+      const builds = directories(root).map((name) => path.join(root, name));
+      if (builds.some((build) => hasLiveLease(build) || hasLiveBuilder(build))) continue;
+      retire(runtimesRoot, root);
+    } catch {
+      // best effort; retried on a later run
+    }
+  }
+}
+
+function directories(parent) {
+  try {
+    return fs
+      .readdirSync(parent, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+  } catch {
+    return [];
+  }
+}
+
 // Moves the folder aside in one step so a partly deleted build is never left behind.
-function retire(parent, root, retired) {
+function retire(parent, root) {
   const trash = path.join(parent, `.trash-${randomUUID()}`);
   try {
     fs.renameSync(root, trash);
-    retired.push(trash);
   } catch {
-    // still in use; retried on a later run
+    return;
+  }
+  remove(trash);
+}
+
+function remove(root) {
+  try {
+    fs.rmSync(root, { recursive: true, force: true });
+  } catch {
+    // leftovers are removed on a later run
   }
 }
 

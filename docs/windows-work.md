@@ -12,9 +12,12 @@ Read this when working on `ask_pro` from Windows and add new findings here.
   `...\state\ask-pro\agents\<id>-<hash>\browser-profile`.
 - `npx skills add` installs the whole repo as the skill. Its launcher,
   `scripts\ask-pro.mjs`, installs, builds, and executes under
-  `...\state\ask-pro\runtimes\<version>-<hash>\`, never in the installed
-  skill folder. Once a new build is running, the launcher removes every other
-  build that no running ask-pro still uses. Windows refuses to move a folder
+  `...\state\ask-pro\runtimes\<install>\<version>-<hash>\`, never in the
+  installed skill folder. Each installed skill folder has its own `<install>`
+  group, so separate installs never remove each other's builds. Once a new build
+  is running, the launcher removes every other build in its group that no
+  running ask-pro still uses, and the groups of skill folders that no longer
+  exist. Windows refuses to move a folder
   that a process still has open; the launcher skips it and retries on a later
   run. It moves each folder aside in one step before deleting it, so a locked
   build is never left half-deleted.

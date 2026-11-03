@@ -94,8 +94,8 @@ V1 is done when all are true:
 - Local/session naming uses project `.ask-pro/` sessions and persistent browser
   profiles under `~/.agents/state/ask-pro/`.
 - The installed skill folder stays unchanged; its launcher builds and runs from
-  `~/.agents/state/ask-pro/runtimes/` and removes other builds once they are no
-  longer in use.
+  `~/.agents/state/ask-pro/runtimes/` and removes that install's other builds
+  once they are no longer in use.
 - User-facing text does not say “smart guy”.
 - Browser automation can open or attach to ChatGPT.
 - Auth gate returns `NEEDS_USER_AUTH` instead of handling credentials.

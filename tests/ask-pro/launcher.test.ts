@@ -78,7 +78,7 @@ async function installSkill(prefix: string) {
   };
   const buildOf = (output: LauncherOutput) =>
     path.dirname(path.dirname(path.dirname(output.entry)));
-  return { skillRoot, projectCwd, runtimes, launcher, writeCli, run, buildOf };
+  return { root, skillRoot, projectCwd, runtimes, launcher, writeCli, run, buildOf };
 }
 
 describe("skill launcher", () => {
@@ -91,7 +91,8 @@ describe("skill launcher", () => {
 
     expect(concurrent.entry).toBe(first.entry);
     expect(first.dependencyResolved).toBe(true);
-    expect(path.dirname(firstBuild)).toBe(skill.runtimes);
+    const installRoot = path.dirname(firstBuild);
+    expect(path.dirname(installRoot)).toBe(skill.runtimes);
     expect(path.basename(firstBuild)).toMatch(/^1\.2\.3-[a-f0-9]{16}$/);
     expect(first.args).toEqual(["status"]);
     expect(first.launcher).toContain(skill.launcher);
@@ -100,9 +101,9 @@ describe("skill launcher", () => {
     expect(await snapshotFiles(skill.skillRoot)).toEqual(before);
 
     // Leftovers from interrupted work, plus an old build a running ask-pro still uses.
-    const abandoned = path.join(skill.runtimes, "0.9.0-abandoned");
-    const trash = path.join(skill.runtimes, ".trash-leftover");
-    const leased = path.join(skill.runtimes, "0.9.0-leased");
+    const abandoned = path.join(installRoot, "0.9.0-abandoned");
+    const trash = path.join(installRoot, ".trash-leftover");
+    const leased = path.join(installRoot, "0.9.0-leased");
     await fs.mkdir(abandoned);
     await fs.writeFile(
       path.join(abandoned, ".ask-pro-runtime-building"),
@@ -116,20 +117,28 @@ describe("skill launcher", () => {
       JSON.stringify({ pid: process.pid }),
     );
 
+    // Builds of another install that still exists, and of one that was removed.
+    const otherInstall = await fakeInstall(skill.runtimes, "other", repoRoot);
+    await fakeInstall(skill.runtimes, "removed", path.join(skill.root, "gone"));
+
     const reused = await skill.run("resume");
     expect(reused.entry).toBe(first.entry);
     expect(reused.args).toEqual(["resume"]);
-    expect((await fs.readdir(skill.runtimes)).sort()).toEqual(
+    expect(await directories(installRoot)).toEqual(
       [path.basename(firstBuild), "0.9.0-leased"].sort(),
+    );
+    expect(await directories(skill.runtimes)).toEqual(
+      [path.basename(installRoot), path.basename(otherInstall)].sort(),
     );
 
     await skill.writeCli(2);
     const updated = await skill.run("status");
     expect(updated.revision).toBe(2);
     expect(skill.buildOf(updated)).not.toBe(firstBuild);
-    expect((await fs.readdir(skill.runtimes)).sort()).toEqual(
+    expect(await directories(installRoot)).toEqual(
       [path.basename(skill.buildOf(updated)), "0.9.0-leased"].sort(),
     );
+    expect(await directories(otherInstall)).toEqual(["0.1.0-other"]);
   }, 180_000);
 
   test.runIf(process.platform === "win32")(
@@ -148,7 +157,7 @@ describe("skill launcher", () => {
         const updated = await skill.run("status");
         const newBuild = skill.buildOf(updated);
         expect(updated.revision).toBe(2);
-        expect((await fs.readdir(skill.runtimes)).sort()).toEqual(
+        expect(await directories(path.dirname(newBuild))).toEqual(
           [path.basename(oldBuild), path.basename(newBuild)].sort(),
         );
         await expect(
@@ -162,11 +171,30 @@ describe("skill launcher", () => {
 
       const later = await skill.run("status");
       expect(later.revision).toBe(2);
-      expect(await fs.readdir(skill.runtimes)).toEqual([path.basename(skill.buildOf(later))]);
+      expect(await directories(path.dirname(oldBuild))).toEqual([
+        path.basename(skill.buildOf(later)),
+      ]);
     },
     180_000,
   );
 });
+
+// The runtime group the launcher keeps for a skill folder at `source`, with one finished build.
+async function fakeInstall(runtimes: string, name: string, source: string): Promise<string> {
+  const installRoot = path.join(runtimes, `install-${name}`);
+  await fs.mkdir(path.join(installRoot, `0.1.0-${name}`), { recursive: true });
+  await fs.writeFile(path.join(installRoot, ".source"), source);
+  await fs.writeFile(path.join(installRoot, `0.1.0-${name}`, ".ask-pro-runtime-ready"), "");
+  return installRoot;
+}
+
+async function directories(parent: string): Promise<string[]> {
+  const entries = await fs.readdir(parent, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+}
 
 async function snapshotFiles(root: string, current = root): Promise<Record<string, string>> {
   const snapshot: Record<string, string> = {};
