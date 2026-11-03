@@ -5,22 +5,23 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 - Prefer PowerShell plus `pnpm` directly.
 - `ask-pro` stores project sessions under `.ask-pro/` and the persistent browser
   profile under
-  `%CODEX_HOME%\state\ask-pro\browser-profile` (default
-  `C:\Users\<you>\.codex\state\ask-pro\browser-profile`).
+  `C:\Users\<you>\.agents\state\ask-pro\browser-profile`
+  (`ASK_PRO_STATE_DIR` overrides the `ask-pro` state folder).
   Normal and concurrent agents use this shared profile without configuration.
   Set `ASK_PRO_AGENT_ID` only for an explicitly isolated agent profile under
-  `%CODEX_HOME%\state\ask-pro\agents\<id>-<hash>\browser-profile`.
-- The first run migrates an inactive legacy profile from
-  `C:\Users\<you>\.agents\skills\ask-pro\`; active profiles and collisions fail
-  closed. If a watcher denies the usual atomic rename or cleanup, ask-pro uses
-  the verified state-path copy and preserves the exact legacy directory
-  without later merging or deleting it.
-- Cached plugin launches install, build, and execute under
-  `%CODEX_HOME%\plugin-runtimes\ask-pro\<version>-<hash>\`, never in the
-  installed plugin cache.
-- Skills CLI installs only `skills/ask-pro/SKILL.md`. Install the standalone
-  CLI with `npm install --global ask-pro`; it does not use Codex's plugin cache
-  or the marketplace runtime-copy path.
+  `...\state\ask-pro\agents\<id>-<hash>\browser-profile`.
+- `npx skills add` and the Codex marketplace plugin both install the whole
+  repo. Its launcher,
+  `scripts\ask-pro.mjs`, installs, builds, and executes under
+  `...\state\ask-pro\runtimes\<install>\<version>-<hash>\`, never in the
+  installed skill folder. Each installed skill folder has its own `<install>`
+  group, so separate installs never remove each other's builds. Once a new build
+  is running, the launcher removes every other build in its group that no
+  running ask-pro still uses, and the groups of skill folders that no longer
+  exist. Windows refuses to move a folder
+  that a process still has open; the launcher skips it and retries on a later
+  run. It moves each folder aside in one step before deleting it, so a locked
+  build is never left half-deleted.
 - Browser login is human-controlled. If ChatGPT asks for login, MFA, or a
   challenge, leave Chrome open and resume with `ask-pro --resume <session-id>`.
   Manual-login recovery discovers the authenticated ChatGPT tab again instead
@@ -106,7 +107,7 @@ Future Windows gotchas belong here.
 - September 10: the model picker exposes `Latest` (currently `6 Pro`). Select the
   literal `Latest` option and keep the reasoning slider on `Pro`. Tool work appears
   inside `[data-streaming-response-status]`; it is progress, not answer content.
-  Refreshing the plugin leaves existing immutable session runtimes running.
+  Updating the skill leaves running sessions on their existing build.
 - September 23: ChatGPT can clear the composer and start generating before its
   current conversation turn selector reports a new turn. A visible Stop control
   confirms submission in that case; a hidden matching element does not. The

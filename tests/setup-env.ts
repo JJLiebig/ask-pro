@@ -1,4 +1,5 @@
 import os from "node:os";
 import path from "node:path";
 
-process.env.ASK_PRO_TEST_HOME ||= path.join(os.tmpdir(), `ask-pro-tests-${process.pid}`);
+// Keep tests away from the real browser profile and runtime builds.
+process.env.ASK_PRO_STATE_DIR ||= path.join(os.tmpdir(), `ask-pro-tests-${process.pid}`);
