@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import "dotenv/config";
+import { runRemoteLogin } from "../src/ask-pro/remoteLogin.js";
 import { AssistantStoppedError } from "../src/browser/errors.js";
 import { AssistantQuestionsError } from "../src/browser/actions/questions.js";
 import { readAskProQuestions } from "../src/ask-pro/questions.js";
@@ -34,6 +35,7 @@ import { migrateLegacyAskProProfiles } from "../src/browser/profileMigration.js"
 import { getCliVersion } from "../src/version.js";
 
 interface AskProOptions {
+  login?: boolean;
   dryRun?: boolean;
   files?: string[];
   promptFile?: string;
@@ -58,6 +60,22 @@ program
   .version(getCliVersion())
   .argument("[question...]", "question to send to ChatGPT Pro")
   .option("--dry-run", "prepare the session and context bundle without opening the browser")
+  .addOption(
+    new Option("--login", "open a private remote sign-in link for headless Chrome").conflicts([
+      "dryRun",
+      "files",
+      "promptFile",
+      "answers",
+      "artifacts",
+      "github",
+      "responseZip",
+      "resume",
+      "status",
+      "harvest",
+      "copy",
+      "temporary",
+    ]),
+  )
   .option("--files <pattern>", "include files or globs in the context bundle", collectFiles, [])
   .option("--prompt-file <path>", "read the question from a UTF-8 file; use - for stdin")
   .option("--artifacts", "ask Pro for ask-pro-response.zip plus markdown fallback")
@@ -100,6 +118,19 @@ program
 await program.parseAsync(process.argv);
 
 async function runAskPro(question: string, options: AskProOptions): Promise<void> {
+  if (options.login) {
+    if (question.trim()) throw new Error("Use --login without a question.");
+    await runRemoteLogin((url) =>
+      writeToon("ask_pro", {
+        state: "needs_auth",
+        action: "open_login_url",
+        login_url: url,
+        expires_minutes: 15,
+      }),
+    );
+    writeToon("ask_pro", { state: "login_closed", action: "confirm_composer_then_resume" });
+    return;
+  }
   const cwd = resolveProjectCwd(options);
   if (options.answers && question.trim())
     throw new Error("Use --answers with --resume, without a question argument.");
@@ -419,6 +450,9 @@ async function printAuthInstructions(
     ...fallbackPreflight,
     ...browserPreflight,
     action: "human_login_then_resume",
+    ...(process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
+      ? { login: `${buildLauncherCommand()} --login` }
+      : {}),
     resume: resumeCommand,
   });
 }

@@ -4,6 +4,10 @@ import { defaultAskProBrowserProfileDir } from "./profilePaths.js";
 import type { BrowserAutomationConfig, ResolvedBrowserConfig } from "./types.js";
 import { normalizeChatgptUrl } from "./utils.js";
 
+export function isHeadlessLinux(platform = process.platform, env = process.env): boolean {
+  return platform === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY;
+}
+
 export const DEFAULT_BROWSER_CONFIG: ResolvedBrowserConfig = {
   chromeProfile: null,
   chromePath: null,
@@ -96,14 +100,14 @@ export function resolveBrowserConfig(
     cookieSyncWaitMs: config?.cookieSyncWaitMs ?? DEFAULT_BROWSER_CONFIG.cookieSyncWaitMs,
     inlineCookies: config?.inlineCookies ?? DEFAULT_BROWSER_CONFIG.inlineCookies,
     inlineCookiesSource: config?.inlineCookiesSource ?? DEFAULT_BROWSER_CONFIG.inlineCookiesSource,
-    headless: config?.headless ?? DEFAULT_BROWSER_CONFIG.headless,
+    headless: config?.headless ?? isHeadlessLinux(),
     keepBrowser: config?.keepBrowser ?? DEFAULT_BROWSER_CONFIG.keepBrowser,
     hideWindow: config?.hideWindow ?? DEFAULT_BROWSER_CONFIG.hideWindow,
     startMinimized: config?.startMinimized ?? DEFAULT_BROWSER_CONFIG.startMinimized,
     desiredModel,
     modelStrategy,
     chromeProfile: config?.chromeProfile ?? DEFAULT_BROWSER_CONFIG.chromeProfile,
-    chromePath: config?.chromePath ?? DEFAULT_BROWSER_CONFIG.chromePath,
+    chromePath: config?.chromePath ?? process.env.CHROME_PATH ?? DEFAULT_BROWSER_CONFIG.chromePath,
     chromeCookiePath: config?.chromeCookiePath ?? DEFAULT_BROWSER_CONFIG.chromeCookiePath,
     attachRunning: config?.attachRunning ?? DEFAULT_BROWSER_CONFIG.attachRunning,
     browserTabRef: config?.browserTabRef ?? DEFAULT_BROWSER_CONFIG.browserTabRef,

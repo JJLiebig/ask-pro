@@ -11,6 +11,15 @@ The calling agent still owns the work. Use Pro for judgment, architecture, risk 
 
 ## Running ask-pro
 
+On a headless Linux host, set `CHROME_PATH` if Chrome is not discovered, and
+`ASK_PRO_LOGIN_HOST` to the host's private Tailscale IP. Before the first query,
+run `ask-pro --login` and give the human its `login_url`. Keep that command alive
+while they sign in from their desktop or phone. The link expires after 15 minutes
+or Done. Never drive the login page or capture its frames during real sign-in.
+After the human confirms the ChatGPT composer is visible, resume the saved
+session or start the requested query. A later `needs_auth` result includes a
+`login` command for the same profile. See [Linux setup](docs/linux.md).
+
 This skill folder contains ask-pro itself; nothing else needs installing. In
 the commands below, `ask-pro` stands for:
 

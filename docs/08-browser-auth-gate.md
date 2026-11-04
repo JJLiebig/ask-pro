@@ -78,13 +78,15 @@ has it.
    for default runs, or
    `~/.agents/state/ask-pro/agents/<id>-<hash>/browser-profile` when
    `ASK_PRO_AGENT_ID` is set
-2. headful manual-login browser
-3. headless only after auth has been verified
+2. headed manual-login browser on desktop systems
+3. headless Linux with human-operated `--login` on a private network
 
 Generic browser automation may attach to a user-approved running Chrome, but
 `ask-pro` keeps agent-scoped runs on the managed profile path.
 
-Headless is an optimization, not the auth bootstrap path.
+Headless Linux bootstraps auth through a private browser relay without a virtual
+display. See [Linux setup](linux.md). The human confirms sign-in before the
+agent resumes; closing the relay does not itself prove authentication.
 
 `ASK_PRO_STATE_DIR` overrides `~/.agents/state/ask-pro/`. Resume rejects
 profile paths outside the state folder.
