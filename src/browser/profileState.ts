@@ -204,9 +204,13 @@ export async function isBrowserProfileInUse(
   userDataDir: string,
   options: { ignoreLockId?: string } = {},
 ): Promise<boolean> {
-  const lock = parseProfileRunLock(
-    await readFile(path.join(userDataDir, ASK_PRO_PROFILE_LOCK_FILENAME), "utf8").catch(() => null),
-  );
+  let raw: string | null = null;
+  try {
+    raw = await readFile(path.join(userDataDir, ASK_PRO_PROFILE_LOCK_FILENAME), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
+  }
+  const lock = parseProfileRunLock(raw);
   if (lock && lock.lockId !== options.ignoreLockId && isProcessAlive(lock.pid)) return true;
 
   const pid = await readChromePid(userDataDir);

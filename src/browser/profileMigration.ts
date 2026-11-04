@@ -16,7 +16,12 @@ import {
   releaseProfileRunLock,
 } from "./profileState.js";
 
-type MigrationOptions = { env?: NodeJS.ProcessEnv; log?: (message: string) => void };
+type MigrationOptions = {
+  env?: NodeJS.ProcessEnv;
+  log?: (message: string) => void;
+  // How long to wait for another process's migration; it is retried on a later run.
+  lockTimeoutMs?: number;
+};
 type LegacyProfile = { root: string; legacy: string; target: string };
 
 // Coordination files live in the current state folder: the migration lock, records of runs that
@@ -37,7 +42,7 @@ export async function migrateLegacyAskProProfiles(options: MigrationOptions = {}
     const profiles = await findLegacyProfiles(env);
     if (profiles.length === 0) return;
     if (await someMissing(profiles.map((profile) => profile.target))) {
-      await withMigrationLock(stateDir, async () => {
+      await withMigrationLock(stateDir, options.lockTimeoutMs, async () => {
         // Only the newest old copy of each profile moves, even if it must wait for a later run.
         const claimed = new Set<string>();
         for (const profile of profiles) {
@@ -78,7 +83,9 @@ export async function prepareAskProBrowserProfile(
     return target;
   };
   // The record keeps a concurrent migration from moving the profile out from under this run.
-  return withMigrationLock(stateDir, () => pick(true)).catch(() => pick(false));
+  return withMigrationLock(stateDir, MIGRATION_LOCK_TIMEOUT_MS, () => pick(true)).catch(() =>
+    pick(false),
+  );
 }
 
 async function findLegacyProfiles(env: NodeJS.ProcessEnv): Promise<LegacyProfile[]> {
@@ -197,10 +204,14 @@ async function removeFolder(folder: string, root: string): Promise<void> {
   await fs.rm(trash, { recursive: true, force: true }).catch(() => undefined);
 }
 
-async function withMigrationLock<T>(stateDir: string, action: () => Promise<T>): Promise<T> {
+async function withMigrationLock<T>(
+  stateDir: string,
+  timeoutMs = MIGRATION_LOCK_TIMEOUT_MS,
+  action: () => Promise<T>,
+): Promise<T> {
   const dir = path.join(stateDir, MIGRATION_DIR);
   const lock = await acquireProfileRunLock(dir, {
-    timeoutMs: MIGRATION_LOCK_TIMEOUT_MS,
+    timeoutMs,
     pollMs: 200,
   });
   try {

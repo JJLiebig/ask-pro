@@ -386,12 +386,12 @@ function hashSource(root) {
   return digest.digest("hex");
 }
 
-function sourceFiles(root) {
+function sourceFiles(root, base = root) {
   const files = [];
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (excluded(entry.name)) continue;
     const fullPath = path.join(root, entry.name);
-    if (entry.isDirectory()) files.push(...sourceFiles(fullPath));
+    if (excluded(path.relative(base, fullPath))) continue;
+    if (entry.isDirectory()) files.push(...sourceFiles(fullPath, base));
     else if (entry.isFile()) files.push(fullPath);
   }
   return files.sort((left, right) => left.localeCompare(right));

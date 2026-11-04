@@ -104,7 +104,10 @@ async function runAskPro(question: string, options: AskProOptions): Promise<void
   if (options.answers && question.trim())
     throw new Error("Use --answers with --resume, without a question argument.");
   await pruneExpiredAskProSessions({ cwd });
-  await migrateLegacyAskProProfiles({ log: (message) => console.error(message) });
+  await migrateLegacyAskProProfiles({
+    log: (message) => console.error(message),
+    lockTimeoutMs: 5_000,
+  });
   if (options.status !== undefined) {
     const { status } = await readAskProStatus({ cwd, sessionId: optionSessionId(options.status) });
     printStatusRecord(status, {
