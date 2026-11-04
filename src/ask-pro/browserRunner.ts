@@ -920,6 +920,11 @@ async function writeTerminalBrowserMetadata(
   });
 }
 
+export async function resolveAskProLoginProfile(cwd: string, sessionId: string): Promise<string> {
+  const paths = getAskProSessionPaths(cwd, sessionId);
+  return resolveResumeBrowserProfile(await readBrowserMetadata(paths.browser));
+}
+
 async function resolveResumeBrowserProfile(metadata: AskProBrowserMetadata): Promise<string> {
   const agentProfile = resolveStoredAgentProfile(metadata.agentId);
   const profileDir = metadata.profileDir;

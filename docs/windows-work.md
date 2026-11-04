@@ -83,6 +83,10 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 
 Future Windows gotchas belong here.
 
+- `--login` is an explicit remote sign-in relay; ordinary Windows runs keep their
+  native window behavior. It does not inspect credentials or migrate profiles
+  between operating systems. Its HTTP server is tested with disposable fixtures.
+
 - Managed Chrome uses a 16 MiB disk-cache limit. Before a fresh launch, ask-pro
   clears only `Default/Cache` and `Default/Code Cache` under the selected shared
   or per-agent profile while holding its launch lock. Active profiles are left

@@ -4,6 +4,10 @@
 
 ### Added
 
+- Support headless Linux with a private `--login` browser link usable from a
+  desktop or phone, without a virtual display. Auto-detect Linux displays and
+  honor `CHROME_PATH` for custom Chrome installs.
+
 - Hand native ChatGPT clarification questions to the calling agent, including
   numbered choices and free text. Resume with `--answers` to answer in the same
   conversation, including recovery when the provider expires its question cards.
