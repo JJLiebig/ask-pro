@@ -158,6 +158,7 @@ export async function startLoginServer(options: {
           key,
           code: key,
           windowsVirtualKeyCode: code,
+          ...(key === "Enter" ? { text: "\r" } : {}),
         });
         await c.Input.dispatchKeyEvent({
           type: "keyUp",
