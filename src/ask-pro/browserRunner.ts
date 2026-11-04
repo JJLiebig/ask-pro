@@ -9,11 +9,11 @@ import {
   askProAgentIdForLegacyBrowserProfileDir,
   askProAgentIdForManagedBrowserProfileDir,
   askProBrowserProfileDirForAgentId,
-  ensureAskProBrowserProfileDir,
-  isLegacyAskProManagedBrowserProfileDir,
   isAskProManagedBrowserProfileDir,
+  isLegacyAskProManagedBrowserProfileDir,
   resolveAskProAgentId,
 } from "../browser/profilePaths.js";
+import { prepareAskProBrowserProfile } from "../browser/profileMigration.js";
 import { runBrowserMode, type BrowserRunResult } from "../browserMode.js";
 import { closeTab } from "../browser/chromeLifecycle.js";
 import { resumeBrowserSession } from "../browser/reattach.js";
@@ -71,7 +71,7 @@ async function runAskProBrowserSessionWithLease({
   const temporary = requestedTemporary ?? (sessionStatus.github ? false : undefined);
   const artifactsRequested = sessionStatus.artifacts === true;
   const agentId = agentIdOverride !== undefined ? agentIdOverride : resolveAskProAgentId();
-  const browserProfile = browserProfileDir ?? (await ensureAskProBrowserProfileDir(agentId));
+  const browserProfile = browserProfileDir ?? (await prepareAskProBrowserProfile(agentId));
   const metadata = await readBrowserMetadata(paths.browser).catch(() => null);
   const chatgptUrl =
     chatgptUrlOverride ??
@@ -925,17 +925,15 @@ async function resolveResumeBrowserProfile(metadata: AskProBrowserMetadata): Pro
   const profileDir = metadata.profileDir;
   const profileAgentId = profileDir ? askProAgentIdForManagedBrowserProfileDir(profileDir) : null;
   const legacyAgentId = profileDir ? askProAgentIdForLegacyBrowserProfileDir(profileDir) : null;
-  if (profileAgentId && profileAgentId !== metadata.agentId) {
-    throw new Error("Stored ask-pro agent profile does not match stored agent id.");
-  }
-  if (legacyAgentId && legacyAgentId !== metadata.agentId) {
+  if ((profileAgentId ?? legacyAgentId) && (profileAgentId ?? legacyAgentId) !== metadata.agentId) {
     throw new Error("Stored ask-pro agent profile does not match stored agent id.");
   }
   if (profileAgentId && agentProfile) {
     return profileDir!;
   }
+  // Sessions from earlier versions record the old profile location; resume where it is now.
   if (legacyAgentId && agentProfile) {
-    return ensureAskProBrowserProfileDir(metadata.agentId);
+    return prepareAskProBrowserProfile(metadata.agentId);
   }
   if (
     profileDir &&
@@ -944,7 +942,7 @@ async function resolveResumeBrowserProfile(metadata: AskProBrowserMetadata): Pro
     !agentProfile &&
     isAskProManagedBrowserProfileDir(profileDir)
   ) {
-    return ensureAskProBrowserProfileDir(null);
+    return askProBrowserProfileDirForAgentId(null);
   }
   if (
     profileDir &&
@@ -953,13 +951,13 @@ async function resolveResumeBrowserProfile(metadata: AskProBrowserMetadata): Pro
     !agentProfile &&
     isLegacyAskProManagedBrowserProfileDir(profileDir)
   ) {
-    return ensureAskProBrowserProfileDir(null);
+    return prepareAskProBrowserProfile(null);
   }
   if (profileDir) {
     throw new Error("Stored ask-pro profile path is invalid.");
   }
 
-  return ensureAskProBrowserProfileDir(metadata.agentId);
+  return prepareAskProBrowserProfile(metadata.agentId);
 }
 
 function resolveStoredAgentProfile(agentId: string | null | undefined): string | null {

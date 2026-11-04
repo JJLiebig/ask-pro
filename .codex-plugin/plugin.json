@@ -1,6 +1,6 @@
 {
   "name": "ask-pro",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Minimal browser-backed ChatGPT Pro escalation workflow for agents via $ask-pro.",
   "author": {
     "name": "Jonathan",

@@ -12,8 +12,10 @@
   managed browser, and a resumable handoff. Request read-only repository evidence
   and citations while retaining local-file context. The flag does not restrict
   the GitHub plugin's actual permissions.
-- Add skills CLI installation for Codex and other supported agents using the
-  standalone `ask-pro` npm CLI.
+- Install ask-pro with `npx skills add JJLiebig/ask-pro -g` for Codex, Claude
+  Code, and other agents the skills CLI supports. The skill contains ask-pro
+  itself: its first run installs dependencies and builds, with no global CLI
+  install. `npx skills update` updates it.
 - Publish `ask-pro` to npm after each passing main-branch CI run.
 
 ### Fixed
@@ -80,6 +82,21 @@
   another run's in-flight browser, and transfer shutdown to the last live run.
 
 ### Changed
+
+- Move all ask-pro state to `~/.agents/state/ask-pro/`, overridable with
+  `ASK_PRO_STATE_DIR`. The first run after upgrading moves signed-in browser
+  profiles there from `$CODEX_HOME/state/ask-pro` and `~/.agents/skills/ask-pro`,
+  so no new login is needed. (`npx skills add` replaces the old skill folder, so
+  a profile still stored inside it is lost and needs one new login.) A profile
+  Chrome still has open is used where it is and moved on a later run; an
+  existing current profile is never overwritten. A link left at the old path
+  keeps installs that have not updated yet on the same signed-in profile.
+  The earlier plugin's builds under `$CODEX_HOME/plugin-runtimes/ask-pro` are
+  removed after a day without launches.
+- After an update, remove the skill's previous builds once the new one runs, and
+  the builds of uninstalled skill folders. Builds that a running ask-pro still
+  uses, or that Windows keeps locked, are retried later. Separate installs keep
+  their own builds.
 
 - Refresh package, pnpm, and CI action versions, and enforce the seven-day
   package-age and dependency-build policies through `pnpm-workspace.yaml`.
@@ -181,6 +198,11 @@
   ask-pro test gate.
 - Clarify manual recovery copy so user-facing hints name only `--copy` for
   answer-bearing copy targets and `--harvest` for raw answers.
+
+### Removed
+
+- Remove the Codex plugin's cached runner and its `plugin:refresh` scripts. The
+  plugin now runs the same bundled launcher as the skills CLI install.
 
 ### Added
 
