@@ -139,7 +139,7 @@ async function moveProfile(profile: LegacyProfile, stateDir: string): Promise<vo
       if ((error as NodeJS.ErrnoException).code !== "EXDEV") return;
     }
     await copyProfile(legacy, target, stateDir);
-    if (await removeFolder(legacy, profile.root)) await linkOldPath(legacy, target);
+    await removeFolder(legacy, profile.root, () => linkOldPath(legacy, target));
   } catch {
     // retried on a later run
   } finally {
@@ -200,17 +200,22 @@ async function linkOldPath(legacy: string, target: string): Promise<void> {
   await fs.symlink(target, legacy, type).catch(() => undefined);
 }
 
-// Moves the folder aside in one step, so a partly deleted profile is never left behind. A folder
-// that cannot be moved stays and is reported as a leftover.
-async function removeFolder(folder: string, root: string): Promise<boolean> {
+// Moves the folder aside in one step, so a partly deleted profile is never left behind, and runs
+// `afterMove` before the slow delete. A folder that cannot be moved stays and is reported as a
+// leftover.
+async function removeFolder(
+  folder: string,
+  root: string,
+  afterMove: () => Promise<void>,
+): Promise<void> {
   const trash = path.join(root, `${TRASH_PREFIX}${randomUUID()}`);
   try {
     await fs.rename(folder, trash);
   } catch {
-    return false;
+    return;
   }
+  await afterMove();
   await fs.rm(trash, { recursive: true, force: true }).catch(() => undefined);
-  return true;
 }
 
 async function withMigrationLock<T>(
