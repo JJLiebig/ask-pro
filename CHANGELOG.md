@@ -89,9 +89,10 @@
   so no new login is needed. (`npx skills add` replaces the old skill folder, so
   a profile still stored inside it is lost and needs one new login.) A profile
   Chrome still has open is used where it is and moved on a later run; an
-  existing current profile is never overwritten.
+  existing current profile is never overwritten. A link left at the old path
+  keeps installs that have not updated yet on the same signed-in profile.
   The earlier plugin's builds under `$CODEX_HOME/plugin-runtimes/ask-pro` are
-  removed once no run uses them.
+  removed after a day without launches.
 - After an update, remove the skill's previous builds once the new one runs, and
   the builds of uninstalled skill folders. Builds that a running ask-pro still
   uses, or that Windows keeps locked, are retried later. Separate installs keep
