@@ -461,7 +461,9 @@ async function printAuthInstructions(
     ...browserPreflight,
     action: "human_login_then_resume",
     ...(process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
-      ? { login: `${buildLauncherCommand()} --login ${quoteCommandArg(sessionId)}` }
+      ? {
+          login: `${buildLauncherCommand()} --cwd ${quoteCommandArg(cwd)} --login ${quoteCommandArg(sessionId)}`,
+        }
       : {}),
     resume: resumeCommand,
   });

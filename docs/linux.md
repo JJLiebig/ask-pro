@@ -25,7 +25,8 @@ node scripts/ask-pro.mjs --login
 ```
 
 Open the emitted `login_url` on your desktop or phone connected to Tailscale.
-Click Log in in the remote browser and complete sign-in yourself. Click a field,
+Select `chatgpt.com` in the tab selector if a blank tab is shown, then click Log in
+in the remote browser and complete sign-in yourself. Click a field,
 then type on a desktop; on a phone use the masked text box and Send text.
 Enter, Tab and Backspace buttons also work. Scroll with a desktop mouse wheel or the Scroll up / Scroll down buttons.
 If authentication opens another tab, choose Refresh tabs and select it.

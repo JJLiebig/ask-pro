@@ -127,7 +127,7 @@ try {
       mobile,
     });
     await viewer.Runtime.evaluate({
-      expression: `new Promise(r=>setTimeout(r,700))`,
+      expression: `inputQueue.then(()=>frame()).then(()=>document.querySelector('#screen').decode())`,
       awaitPromise: true,
     });
     assert.equal(
