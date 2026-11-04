@@ -26,7 +26,7 @@ process.env.ASK_PRO_STATE_DIR = root;
 const profile = path.join(root, "browser-profile");
 const fixture = http.createServer((_req, res) =>
   res.end(
-    '<!doctype html><meta name="viewport" content="width=device-width"><form onsubmit="event.preventDefault();document.querySelector(\'h1\').textContent=\'Submitted\'"><h1>Local sign-in fixture</h1><input aria-label="Fixture input"><button>Continue</button></form>',
+    '<!doctype html><meta name="viewport" content="width=device-width"><form onsubmit="event.preventDefault();document.querySelector(\'h1\').textContent=\'Submitted\';window.submittedValue=document.querySelector(\'input\').value"><h1>Local sign-in fixture</h1><input aria-label="Fixture input"><button>Continue</button></form><div style="height:1800px"></div>',
   ),
 );
 await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
@@ -40,7 +40,10 @@ try {
   assert.equal((await maybeReuseRunningChrome(profile, () => {})).pid, chrome.pid);
   const lock = await acquireProfileRunLock(profile, { timeoutMs: 1000 });
   assert.ok(lock);
-  assert.equal(await acquireProfileRunLock(profile, { timeoutMs: 30, pollMs: 5 }), null);
+  await assert.rejects(
+    acquireProfileRunLock(profile, { timeoutMs: 30, pollMs: 5 }),
+    /profile lock still held/,
+  );
   await lock.release();
   const lease = await createManagedChromeRunLease(profile);
   assert.equal(await releaseManagedChromeRunLeaseAndCountPeers(profile, lease), 0);
@@ -147,7 +150,7 @@ try {
   await client.Runtime.evaluate({ expression: 'document.querySelector("input").focus()' });
   await viewer.Runtime.evaluate({
     expression:
-      'document.querySelector("#text").value="-phone";document.querySelector("form").requestSubmit()',
+      'document.querySelector("#text").value="-phone";document.querySelector("form").requestSubmit();document.querySelector("#enter").click()',
   });
   await viewer.Runtime.evaluate({
     expression: "new Promise(r=>setTimeout(r,200))",
@@ -158,6 +161,16 @@ try {
       .value,
     "fixture-only-phone",
   );
+  assert.equal(
+    (await client.Runtime.evaluate({ expression: "window.submittedValue" })).result.value,
+    "fixture-only-phone",
+  );
+  await viewer.Runtime.evaluate({ expression: 'document.querySelector("#down").click()' });
+  await viewer.Runtime.evaluate({
+    expression: "new Promise(r=>setTimeout(r,200))",
+    awaitPromise: true,
+  });
+  assert.ok((await client.Runtime.evaluate({ expression: "scrollY" })).result.value > 0);
   // Replacement tab discovery is how auth redirects/popups are recovered.
   const replacement = await CDP.New({
     port: chrome.port,

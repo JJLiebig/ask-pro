@@ -19,7 +19,7 @@ Never transfer a Windows profile to Linux; create a Linux profile and sign in on
 On the host, set the private network address reachable from your devices:
 
 ```sh
-export CHROME_PATH="$HOME/.local/share/ask-pro/chrome/chrome-linux64/chrome" # if needed
+export CHROME_PATH=/opt/google/chrome/chrome # optional; installed Chrome is discovered
 export ASK_PRO_LOGIN_HOST=100.123.207.19 # your host's Tailscale IP
 node scripts/ask-pro.mjs --login
 ```
@@ -27,7 +27,7 @@ node scripts/ask-pro.mjs --login
 Open the emitted `login_url` on your desktop or phone connected to Tailscale.
 Click Log in in the remote browser and complete sign-in yourself. Click a field,
 then type on a desktop; on a phone use the masked text box and Send text.
-Enter, Tab and Backspace buttons also work. Scroll with a desktop mouse wheel.
+Enter, Tab and Backspace buttons also work. Scroll with a desktop mouse wheel or the Scroll up / Scroll down buttons.
 If authentication opens another tab, choose Refresh tabs and select it.
 Select Done when the ChatGPT composer is visible. Tell your agent sign-in is
 complete, then it can run the requested question or the saved `--resume` command.
@@ -38,7 +38,7 @@ systemd service on a headless host). Done, Ctrl-C, or 15 minutes closes the
 relay and releases the launch lock; Chrome and its profile remain for resume.
 An expired link is replaced by running `--login` again. Do not run other ask-pro
 commands during login. Active browser runs prevent opening the login relay.
-If a query later returns `needs_auth`, run its emitted `login` command, complete
+If a query later returns `needs_auth`, run its emitted `login` command (which identifies the saved session profile), complete
 the same human flow, then resume. Headless queries return that handoff without
 waiting for a nonexistent desktop window.
 

@@ -235,13 +235,13 @@ export async function startLoginServer(options: {
   return { url: "http://" + hostname + ":" + address.port + "/#" + token, done, close };
 }
 
-export async function runRemoteLogin(onReady: (url: string) => void) {
+export async function runRemoteLogin(onReady: (url: string) => void, savedProfile?: string) {
   const host = process.env.ASK_PRO_LOGIN_HOST?.trim();
   if (!host)
     throw Error(
       "Set ASK_PRO_LOGIN_HOST to this machine’s private network IP (for example its Tailscale IP), then run --login.",
     );
-  const profile = await prepareAskProBrowserProfile(resolveAskProAgentId());
+  const profile = savedProfile ?? (await prepareAskProBrowserProfile(resolveAskProAgentId()));
   const lock = await acquireProfileRunLock(profile, { timeoutMs: 1000 });
   if (!lock) throw Error("Browser busy. Wait for ask-pro runs to finish before --login.");
   const lease = await createManagedChromeRunLease(profile);

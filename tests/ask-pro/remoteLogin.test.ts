@@ -1,5 +1,10 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { startLoginServer } from "../../src/ask-pro/remoteLogin.js";
+import { resolveAskProLoginProfile } from "../../src/ask-pro/browserRunner.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { getAskProSessionPaths } from "../../src/ask-pro/session.js";
 
 const list = vi.hoisted(() => vi.fn(async () => []));
 vi.mock("chrome-remote-interface", () => ({ default: Object.assign(vi.fn(), { List: list }) }));
@@ -7,6 +12,30 @@ let relay: Awaited<ReturnType<typeof startLoginServer>> | undefined;
 afterEach(async () => {
   await relay?.close();
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
+});
+
+test("login uses the saved session profile across agent environments and rejects an outside path", async () => {
+  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-login-profile-"));
+  vi.stubEnv("ASK_PRO_STATE_DIR", path.join(cwd, "state"));
+  vi.stubEnv("ASK_PRO_AGENT_ID", "different-agent");
+  try {
+    const agentId = "review-0123456789";
+    const profileDir = path.join(cwd, "state", "agents", agentId, "browser-profile");
+    const paths = getAskProSessionPaths(cwd, "fixture");
+    await fs.mkdir(paths.dir, { recursive: true });
+    await fs.writeFile(paths.browser, JSON.stringify({ agentId, profileDir }));
+    expect(await resolveAskProLoginProfile(cwd, "fixture")).toBe(profileDir);
+    await fs.writeFile(
+      paths.browser,
+      JSON.stringify({ agentId, profileDir: path.join(cwd, "outside") }),
+    );
+    await expect(resolveAskProLoginProfile(cwd, "fixture")).rejects.toThrow(
+      "profile path is invalid",
+    );
+  } finally {
+    await fs.rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test("requires the private key before accessing tabs, rejects cross-origin control, and revokes access on Done", async () => {

@@ -20,6 +20,7 @@ import {
 } from "../src/ask-pro/session.js";
 import {
   AskProNeedsAuthError,
+  resolveAskProLoginProfile,
   isSuspiciousPreambleAnswer,
   resumeAskProBrowserSession,
   runAskProBrowserSession,
@@ -35,7 +36,7 @@ import { migrateLegacyAskProProfiles } from "../src/browser/profileMigration.js"
 import { getCliVersion } from "../src/version.js";
 
 interface AskProOptions {
-  login?: boolean;
+  login?: boolean | string;
   dryRun?: boolean;
   files?: string[];
   promptFile?: string;
@@ -61,7 +62,10 @@ program
   .argument("[question...]", "question to send to ChatGPT Pro")
   .option("--dry-run", "prepare the session and context bundle without opening the browser")
   .addOption(
-    new Option("--login", "open a private remote sign-in link for headless Chrome").conflicts([
+    new Option(
+      "--login [session-id]",
+      "open a private remote sign-in link for headless Chrome",
+    ).conflicts([
       "dryRun",
       "files",
       "promptFile",
@@ -118,20 +122,26 @@ program
 await program.parseAsync(process.argv);
 
 async function runAskPro(question: string, options: AskProOptions): Promise<void> {
+  const cwd = resolveProjectCwd(options);
   if (options.login) {
     if (question.trim()) throw new Error("Use --login without a question.");
-    await runRemoteLogin((url) =>
-      writeToon("ask_pro", {
-        state: "needs_auth",
-        action: "open_login_url",
-        login_url: url,
-        expires_minutes: 15,
-      }),
+    const profile =
+      typeof options.login === "string"
+        ? await resolveAskProLoginProfile(cwd, options.login)
+        : undefined;
+    await runRemoteLogin(
+      (url) =>
+        writeToon("ask_pro", {
+          state: "needs_auth",
+          action: "open_login_url",
+          login_url: url,
+          expires_minutes: 15,
+        }),
+      profile,
     );
     writeToon("ask_pro", { state: "login_closed", action: "confirm_composer_then_resume" });
     return;
   }
-  const cwd = resolveProjectCwd(options);
   if (options.answers && question.trim())
     throw new Error("Use --answers with --resume, without a question argument.");
   await pruneExpiredAskProSessions({ cwd });
@@ -451,7 +461,7 @@ async function printAuthInstructions(
     ...browserPreflight,
     action: "human_login_then_resume",
     ...(process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
-      ? { login: `${buildLauncherCommand()} --login` }
+      ? { login: `${buildLauncherCommand()} --login ${quoteCommandArg(sessionId)}` }
       : {}),
     resume: resumeCommand,
   });
