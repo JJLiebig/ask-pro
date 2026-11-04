@@ -576,6 +576,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
         },
         userDataDir,
         logger,
+        { ignoreLockId: (profileLock as ProfileRunLock | null)?.lockId },
       ));
     // Persist profile state so future manual-login runs can reuse this Chrome.
     if (manualLogin && chrome.port) {

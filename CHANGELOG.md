@@ -20,6 +20,9 @@
 
 ### Fixed
 
+- Limit managed Chrome's disk cache to 16 MiB and clear idle profiles' page and
+  code caches before launch, preserving sign-in data and active browser runs.
+
 - Recognize ChatGPT's current Stop control when reporting thinking activity,
   instead of repeatedly reporting that no thinking status was detected.
 
