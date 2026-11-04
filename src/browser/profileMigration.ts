@@ -273,7 +273,7 @@ async function reportLeftovers(
   if (fresh.length === 0) return;
   for (const { legacy, target } of fresh) {
     log(
-      `ask-pro uses ${target}. The older browser profile at ${legacy} is unused; you can delete it.`,
+      `ask-pro now uses ${target}. Once no Chrome window or older ask-pro uses ${legacy}, you can delete it.`,
     );
   }
   await fs.mkdir(path.dirname(file), { recursive: true });
