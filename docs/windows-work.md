@@ -83,6 +83,12 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 
 Future Windows gotchas belong here.
 
+- Managed Chrome uses a 16 MiB disk-cache limit. Before a fresh launch, ask-pro
+  clears only `Default/Cache` and `Default/Code Cache` under the selected shared
+  or per-agent profile while holding its launch lock. Active profiles are left
+  alone; locked cache folders are skipped silently. Cookies, Local Storage,
+  IndexedDB, and other sign-in data are preserved.
+
 - October 14: thinking-status monitoring now uses the same visible composer Stop
   selector as submission and response capture. The current icon-only
   `aria-label="Stop"` control confirms activity without a separate thinking label;

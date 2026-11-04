@@ -545,7 +545,9 @@ async function resumeBrowserSessionViaNewChrome(
     if (!reusedChrome) {
       await seedChromeProfileLanguage(userDataDir, resolved.acceptLanguage, logger);
     }
-    chrome = reusedChrome ?? (await launchChrome(resolved, userDataDir, logger));
+    chrome =
+      reusedChrome ??
+      (await launchChrome(resolved, userDataDir, logger, { ignoreLockId: launchLock?.lockId }));
     if (manualLogin) {
       reattachRunLease = {
         userDataDir,

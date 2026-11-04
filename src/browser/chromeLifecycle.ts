@@ -11,6 +11,7 @@ import { Launcher, type LaunchedChrome } from "chrome-launcher";
 import type { BrowserLogger, ResolvedBrowserConfig, ChromeClient } from "./types.js";
 import {
   clearChromeLaunchStarting,
+  clearIdleBrowserProfileCaches,
   cleanupStaleProfileState,
   hasChromeLaunchStarting,
   markChromeLaunchStarting,
@@ -35,6 +36,7 @@ export async function launchChrome(
   config: ResolvedBrowserConfig,
   userDataDir: string,
   logger: BrowserLogger,
+  options: { ignoreLockId?: string } = {},
 ) {
   const connectHost = resolveRemoteDebugHost();
   const debugBindAddress = connectHost && connectHost !== "127.0.0.1" ? "0.0.0.0" : connectHost;
@@ -44,6 +46,7 @@ export async function launchChrome(
       startMinimized: shouldLaunchChromeMinimized(config),
     }),
   );
+  await clearIdleBrowserProfileCaches(userDataDir, options);
   await markChromeLaunchStarting(userDataDir);
   try {
     const launcher = await launchManagedChrome({
@@ -792,6 +795,7 @@ export function buildChromeFlags(
   const primaryLanguage = acceptLanguage.split(",", 1)[0]?.trim() || "en-US";
   const flags = [
     "--disable-background-networking",
+    "--disk-cache-size=16777216",
     "--disable-breakpad",
     "--disable-client-side-phishing-detection",
     "--disable-default-apps",

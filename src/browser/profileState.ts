@@ -213,6 +213,19 @@ export async function isBrowserProfileInUse(
   const lock = parseProfileRunLock(raw);
   if (lock && lock.lockId !== options.ignoreLockId && isProcessAlive(lock.pid)) return true;
 
+  try {
+    const leases = await readdir(path.join(userDataDir, ASK_PRO_RUN_LEASE_DIRNAME));
+    if (
+      leases.some(
+        (name) => name.endsWith(".lease") && isProcessAlive(Number(name.match(/^(\d+)-/)?.[1])),
+      )
+    ) {
+      return true;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return true;
+  }
+
   const pid = await readChromePid(userDataDir);
   const port = await readDevToolsPort(userDataDir);
   const [owner, devTools] = await Promise.all([
@@ -221,6 +234,23 @@ export async function isBrowserProfileInUse(
   ]);
   if (owner === true || (pid && isProcessAlive(pid) && devTools?.ok)) return true;
   return owner === null;
+}
+
+// Call while holding the profile's launch lock; only disposable caches are removed.
+export async function clearIdleBrowserProfileCaches(
+  userDataDir: string,
+  options: { ignoreLockId?: string } = {},
+): Promise<void> {
+  try {
+    if (await isBrowserProfileInUse(userDataDir, options)) return;
+    for (const name of ["Cache", "Code Cache"]) {
+      await rm(path.join(userDataDir, "Default", name), { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+    }
+  } catch {
+    // Cache maintenance must never prevent a browser run.
+  }
 }
 
 export async function acquireProfileRunLock(
