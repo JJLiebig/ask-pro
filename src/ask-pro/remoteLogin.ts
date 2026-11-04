@@ -133,6 +133,7 @@ export async function startLoginServer(options: {
       }
       const body = JSON.parse(raw) as Record<string, unknown>;
       const c = await connect(typeof body.target === "string" ? body.target : "");
+      await c.Page.bringToFront();
       const coordinate = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0;
       if (body.kind === "text" && typeof body.text === "string")
         await c.Input.insertText({ text: body.text });
