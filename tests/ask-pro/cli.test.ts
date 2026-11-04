@@ -153,7 +153,11 @@ describe("ask-pro cli", () => {
         await fs.readFile(path.join(env.ASK_PRO_STATE_DIR, profile, "Local State"), "utf8"),
       ).toBe(profile);
     }
-    await expect(fs.stat(oldState)).rejects.toMatchObject({ code: "ENOENT" });
+    // An older install still opening the old path reaches the moved profile.
+    expect(await fs.readFile(path.join(oldState, "browser-profile", "Local State"), "utf8")).toBe(
+      "browser-profile",
+    );
+    expect((await fs.lstat(path.join(oldState, "browser-profile"))).isSymbolicLink()).toBe(true);
   }, 30000);
 
   test("creates a dry-run session from a prompt file", async () => {

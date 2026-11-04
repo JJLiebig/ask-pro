@@ -31,6 +31,7 @@ const RETIRING_MARKER = ".ask-pro-runtime-retiring";
 const BUILDING_MARKER = ".ask-pro-runtime-building";
 const BUILD_HEARTBEAT_STALE_MS = 30_000;
 const STAGING_STALE_MS = 24 * 60 * 60 * 1000;
+const LEGACY_BUILD_IDLE_MS = 24 * 60 * 60 * 1000;
 const runtimeRoot = await ensureRuntime();
 const cliEntry = path.join(runtimeRoot, "dist", "bin", "ask-pro-cli.js");
 const launcher = `${quoteCommandPart(process.execPath)} ${quoteCommandPart(sourceScript)} --`;
@@ -55,12 +56,7 @@ try {
       leases.push(childLease);
       pruneBuilds(installRoot, runtimeRoot);
       pruneUninstalled();
-      pruneBuilds(legacyRuntimesRoot, legacyRuntimesRoot);
-      try {
-        fs.rmdirSync(legacyRuntimesRoot);
-      } catch {
-        // still holds a build in use, or already gone
-      }
+      pruneLegacyBuilds();
     },
   );
 } finally {
@@ -169,10 +165,9 @@ async function waitForRuntime(target) {
   return true;
 }
 
-// Removes this install's leftover builds. With `keep` (a build, or `parent` to keep none), every
-// other finished build goes too, unless a running ask-pro still leases it. A folder that cannot
-// be moved (on Windows, a process still has it open) is skipped and retried on a later run.
-// Cleanup never fails the current run.
+// Removes this install's leftover builds. With `keep`, every other finished build goes too,
+// unless a running ask-pro still leases it. A folder that cannot be moved (on Windows, a process
+// still has it open) is skipped and retried on a later run. Cleanup never fails the current run.
 function pruneBuilds(parent, keep) {
   for (const entry of directories(parent)) {
     const root = path.join(parent, entry);
@@ -268,6 +263,33 @@ function restoreReady(root) {
     fs.renameSync(path.join(root, RETIRING_MARKER), path.join(root, READY_MARKER));
   } catch {
     // retried on a later run
+  }
+}
+
+// The earlier plugin launcher refreshes a build's ready marker on every launch but leases it only
+// once its CLI runs, and may still run in a Codex session that has not restarted. Its builds go
+// only after a day without launches.
+function pruneLegacyBuilds() {
+  for (const entry of directories(legacyRuntimesRoot)) {
+    const root = path.join(legacyRuntimesRoot, entry);
+    try {
+      if (entry.startsWith(".trash-")) {
+        remove(root);
+        continue;
+      }
+      const ready = path.join(root, READY_MARKER);
+      const lastUse = fs.statSync(fs.existsSync(ready) ? ready : root).mtimeMs;
+      if (Date.now() - lastUse < LEGACY_BUILD_IDLE_MS) continue;
+      if (hasLiveBuilder(root) || hasLiveLease(root)) continue;
+      retire(legacyRuntimesRoot, root);
+    } catch {
+      // best effort; retried on a later run
+    }
+  }
+  try {
+    fs.rmdirSync(legacyRuntimesRoot);
+  } catch {
+    // still holds a build, or already gone
   }
 }
 

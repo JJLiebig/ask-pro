@@ -78,6 +78,12 @@ async function setup() {
   };
 }
 
+// Older installs that still open the old path reach the moved profile through a link there.
+async function forwards(from: string, to: string): Promise<boolean> {
+  const info = await fs.lstat(from).catch(() => null);
+  return Boolean(info?.isSymbolicLink()) && (await fs.realpath(from)) === (await fs.realpath(to));
+}
+
 async function exists(target: string): Promise<boolean> {
   return fs.stat(target).then(
     () => true,
@@ -122,9 +128,13 @@ describe("browser profile migration", () => {
         "utf8",
       ),
     ).toBe("agent-cookies");
-    // Emptied old folders are removed; the installed skill stays.
-    expect(await exists(t.codexState)).toBe(false);
-    expect(await fs.readdir(t.skillFolder)).toEqual(["SKILL.md"]);
+    for (const [old, id] of [
+      [t.codexState, null],
+      [t.codexState, agentId],
+      [t.skillFolder, otherAgentId],
+    ] as const) {
+      expect(await forwards(t.profile(old, id), t.profile(t.state, id))).toBe(true);
+    }
 
     const log = vi.fn();
     const before = await fs.readdir(t.state, { recursive: true });
@@ -170,7 +180,7 @@ describe("browser profile migration", () => {
 
     expect(await t.run()).toBe(t.profile(t.state));
     expect(await t.readMarker(t.profile(t.state))).toBe("old");
-    expect(await exists(old)).toBe(false);
+    expect(await forwards(old, t.profile(t.state))).toBe(true);
     expect(await t.readMarker(t.profile(t.skillFolder))).toBe("oldest");
   }, 30_000);
 
@@ -192,7 +202,7 @@ describe("browser profile migration", () => {
 
       expect(await t.run()).toBe(t.profile(t.state));
       expect(await t.readMarker(t.profile(t.state))).toBe("old");
-      expect(await exists(old)).toBe(false);
+      expect(await forwards(old, t.profile(t.state))).toBe(true);
     },
     30_000,
   );
@@ -212,7 +222,7 @@ describe("browser profile migration", () => {
     ]);
     expect(await t.readMarker(t.profile(t.state))).toBe("shared");
     expect(await t.readMarker(t.profile(t.state, agentId))).toBe("agent");
-    expect(await exists(t.codexState)).toBe(false);
+    expect(await forwards(t.profile(t.codexState), t.profile(t.state))).toBe(true);
   }, 60_000);
 
   test("copies, verifies, then removes an old profile on another volume", async () => {
@@ -233,7 +243,7 @@ describe("browser profile migration", () => {
     expect(
       await fs.readFile(path.join(t.profile(t.state), "Default", "Network", "Cookies"), "utf8"),
     ).toBe("old-cookies");
-    expect(await exists(old)).toBe(false);
+    expect(await forwards(old, t.profile(t.state))).toBe(true);
     expect(await fs.readdir(path.join(t.state, ".migration"))).not.toContainEqual(
       expect.stringMatching(/^copy-/),
     );

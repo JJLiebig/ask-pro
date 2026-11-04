@@ -144,20 +144,25 @@ describe("skill launcher", () => {
     expect(await directories(otherInstall)).toEqual(["0.1.0-other"]);
   }, 180_000);
 
-  test("removes the earlier plugin launcher's builds once no run uses them", async () => {
+  test("removes the earlier plugin launcher's builds once unused for a day", async () => {
     const skill = await installSkill("ask-pro-launcher-legacy-");
     const legacyRuntimes = path.join(skill.codexHome, "plugin-runtimes", "ask-pro");
-    const leased = path.join(legacyRuntimes, "0.1.0-leased");
-    for (const build of ["0.1.0-old", "0.1.0-leased"]) {
-      await fs.mkdir(path.join(legacyRuntimes, build), { recursive: true });
-      await fs.writeFile(path.join(legacyRuntimes, build, ".ask-pro-runtime-ready"), "");
+    const ready = (build: string) => path.join(legacyRuntimes, build, ".ask-pro-runtime-ready");
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    for (const build of ["0.1.0-idle", "0.1.0-leased", "0.1.0-recent"]) {
+      await fs.mkdir(path.dirname(ready(build)), { recursive: true });
+      await fs.writeFile(ready(build), "");
+      // The earlier launcher refreshes this marker on every launch.
+      if (build !== "0.1.0-recent") await fs.utimes(ready(build), twoDaysAgo, twoDaysAgo);
     }
-    await fs.writeFile(path.join(leased, ".active-1.json"), JSON.stringify({ pid: process.pid }));
+    const lease = path.join(legacyRuntimes, "0.1.0-leased", ".active-1.json");
+    await fs.writeFile(lease, JSON.stringify({ pid: process.pid }));
 
     await skill.run("status");
-    expect(await directories(legacyRuntimes)).toEqual(["0.1.0-leased"]);
+    expect(await directories(legacyRuntimes)).toEqual(["0.1.0-leased", "0.1.0-recent"]);
 
-    await fs.rm(path.join(leased, ".active-1.json"));
+    await fs.rm(lease);
+    await fs.utimes(ready("0.1.0-recent"), twoDaysAgo, twoDaysAgo);
     await skill.run("status");
     await expect(fs.stat(legacyRuntimes)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await directories(path.join(skill.codexHome, "plugin-runtimes"))).toEqual([]);

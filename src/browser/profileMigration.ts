@@ -104,7 +104,7 @@ async function findLegacyProfiles(env: NodeJS.ProcessEnv): Promise<LegacyProfile
       : [];
     for (const agentId of [null, ...agentIds]) {
       const legacy = askProBrowserProfileDirUnder(root, agentId);
-      if (await exists(legacy)) {
+      if (await isRealFolder(legacy)) {
         profiles.push({ root, legacy, target: askProBrowserProfileDirUnder(stateDir, agentId) });
       }
     }
@@ -131,6 +131,7 @@ async function moveProfile(profile: LegacyProfile, stateDir: string): Promise<vo
     try {
       await fs.rename(legacy, target);
       lockPath = path.join(target, PROFILE_LOCK_FILENAME);
+      await linkOldPath(legacy, target);
       return;
     } catch (error) {
       // Anything but a move across volumes (on Windows: a profile Chrome still has open) is
@@ -138,7 +139,7 @@ async function moveProfile(profile: LegacyProfile, stateDir: string): Promise<vo
       if ((error as NodeJS.ErrnoException).code !== "EXDEV") return;
     }
     await copyProfile(legacy, target, stateDir);
-    await removeFolder(legacy, profile.root);
+    if (await removeFolder(legacy, profile.root)) await linkOldPath(legacy, target);
   } catch {
     // retried on a later run
   } finally {
@@ -192,16 +193,24 @@ async function listTree(root: string): Promise<Map<string, string>> {
   return tree;
 }
 
+// An older ask-pro install that has not been updated yet keeps opening the old path. A link
+// there sends it to the moved profile, so it stays signed in and shares the same run lock.
+async function linkOldPath(legacy: string, target: string): Promise<void> {
+  const type = process.platform === "win32" ? "junction" : "dir";
+  await fs.symlink(target, legacy, type).catch(() => undefined);
+}
+
 // Moves the folder aside in one step, so a partly deleted profile is never left behind. A folder
 // that cannot be moved stays and is reported as a leftover.
-async function removeFolder(folder: string, root: string): Promise<void> {
+async function removeFolder(folder: string, root: string): Promise<boolean> {
   const trash = path.join(root, `${TRASH_PREFIX}${randomUUID()}`);
   try {
     await fs.rename(folder, trash);
   } catch {
-    return;
+    return false;
   }
   await fs.rm(trash, { recursive: true, force: true }).catch(() => undefined);
+  return true;
 }
 
 async function withMigrationLock<T>(
@@ -261,7 +270,9 @@ async function reportLeftovers(
   if (!log) return;
   const leftovers: LegacyProfile[] = [];
   for (const profile of profiles) {
-    if ((await exists(profile.legacy)) && (await exists(profile.target))) leftovers.push(profile);
+    if ((await isRealFolder(profile.legacy)) && (await exists(profile.target))) {
+      leftovers.push(profile);
+    }
   }
   if (leftovers.length === 0) return;
   const file = path.join(stateDir, MIGRATION_DIR, "reported-leftovers.json");
@@ -300,6 +311,14 @@ async function removeEmptyFolders(profiles: LegacyProfile[]): Promise<void> {
 async function someMissing(paths: string[]): Promise<boolean> {
   for (const candidate of paths) if (!(await exists(candidate))) return true;
   return false;
+}
+
+// Not the link an earlier move leaves at the old path.
+async function isRealFolder(candidate: string): Promise<boolean> {
+  return fs.lstat(candidate).then(
+    (info) => info.isDirectory(),
+    () => false,
+  );
 }
 
 async function exists(candidate: string): Promise<boolean> {
