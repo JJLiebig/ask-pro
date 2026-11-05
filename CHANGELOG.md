@@ -4,6 +4,10 @@
 
 ### Added
 
+- Return `needs_human_check` with a private-network screenshot-and-click link
+  for headless Cloudflare challenges. The human clicks the checkbox; the viewer
+  detects completion and the agent resumes, without keyboard or login forwarding.
+
 - Import personal-browser sessions on headless machines with `--import-session`
   through stdin, including chunked cookies and a login check without a query.
   Remove the remote login relay; retain desktop `--login`, Linux Chrome discovery,

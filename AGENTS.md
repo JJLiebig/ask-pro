@@ -12,6 +12,9 @@ ask_pro-specific notes:
   MFA codes, recovery codes, session cookies, or raw auth tokens. Only the human
   supplies cookies directly to `--import-session` stdin; never inspect that input
   or real profile cookies.
+- Human-check relay: the human alone opens `check_url` and clicks real Cloudflare
+  controls. Agents ask the human, then resume; never inspect real challenge frames
+  or automate the checkbox. Local fake-checkbox fixtures are permitted.
 - Browser “Pro thinking” gate: never click or auto-click ChatGPT's `Answer now`
   button. Treat it as a placeholder and wait for the real assistant response.
 - Current ChatGPT UI note: select `Latest` when available, otherwise the highest

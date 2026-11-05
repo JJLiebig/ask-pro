@@ -15,7 +15,8 @@ so remote sign-in forwarding has been removed. A later attended check also
 encountered ChatGPT's interactive human-verification checkbox on that IP after
 session import. Import fixes the login transfer only: a server whose IP
 Cloudflare challenges can keep hitting the human check, including on queries.
-Do not click or automate that checkbox. With a desktop, `--login` opens
+The human-check viewer below lets the human click it. Agents must never click
+or automate that checkbox. With a desktop, `--login` opens
 Chrome for manual sign-in.
 
 ## Import your personal-browser session
@@ -87,6 +88,37 @@ session logs. Existing local Cloudflare cookies are left to the browser. State
 lives under `~/.agents/state/ask-pro`; `ASK_PRO_STATE_DIR` selects a different
 state folder. Do not copy an entire Windows browser profile to Linux.
 
+## Human checks on a headless server
+
+When a query encounters a Cloudflare challenge, ask-pro leaves Chrome open and
+returns `state: needs_human_check`, a `check_url`, and a `resume` command. The
+calling agent asks: **ask-pro needs a Cloudflare check clicked: <url>**.
+Open the link on your own device and click the verification checkbox in the
+live page. When it clears, the page says **Check cleared** automatically. Return
+to your agent so it can run the emitted resume command. There is no Done button.
+
+The viewer binds `0.0.0.0`; its link uses the server hostname by default. If that
+name is not reachable from your devices, set `ASK_PRO_CHECK_HOST` to its Tailscale
+IP or reachable hostname before running ask-pro. For example:
+
+```sh
+export ASK_PRO_CHECK_HOST=100.123.207.19 # replace with your server's address
+```
+
+Use Tailscale or another trusted encrypted private network; do not expose this
+HTTP port on the public internet. The random link key grants screenshot and click
+access to this one challenged tab for at most 15 minutes. It stays in the URL
+fragment so reloading works. Once the check clears, the viewer stops showing
+frames and closes shortly afterward; resume also closes the old viewer. Chrome
+stays open for recovery. If the link expires, ask the agent to resume for a new
+one. There is no keyboard, text forwarding, login viewer or tab selector. It
+never copies cookies or disguises browser automation. Real challenges are for
+the human alone; agents must not inspect screenshots or click their controls.
+
+A challenge before submission resumes the unsent question; a challenge after
+submission resumes the existing response. Login failures still use session
+import, not this viewer. Checks may recur on a challenged datacenter IP.
+
 ## Session lifetime and limits
 
 There is no promised lifetime or guarantee that cross-device reuse works.
@@ -107,3 +139,8 @@ After `pnpm run build`, run `node scripts/smoke-session-import.mjs`. It uses a
 throwaway `ASK_PRO_STATE_DIR`, fake cookies and a local page, and checks cookie
 replacement and persistence across a real Chrome restart. It never signs in or
 sends a query. Remove only test profiles and processes created by the smoke.
+
+`node scripts/smoke-human-check.mjs` additionally checks a local fake checkbox:
+viewer click mapping, automatic completion, access control, fragment reload,
+no post-check frames, and a viewer worker surviving its controller's exit.
+It never visits ChatGPT or clicks a real human-verification control.

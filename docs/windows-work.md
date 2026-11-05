@@ -144,3 +144,8 @@ Future Windows gotchas belong here.
   the final conversation ID or print it as a recovery link. A browser observer
   that never settles must still obey the response deadline, including any reload
   attempt.
+
+- The headless human-check viewer is limited to a single challenged tab, frames
+  and pointer clicks. Its link survives reload; it closes automatically on clear
+  or expires after 15 minutes. Its worker retains a browser-run lease across CLI
+  exit. The local fake-checkbox smoke runs on Windows without real auth or queries.
