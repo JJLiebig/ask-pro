@@ -24,6 +24,9 @@
 
 ### Fixed
 
+- Use headed Chrome on a managed private Xvfb display on display-less Linux hosts,
+  avoiding the headless-only Cloudflare block. Keep remote login links usable on reload.
+
 - Limit managed Chrome's disk cache to 16 MiB and clear idle profiles' page and
   code caches before launch, preserving sign-in data and active browser runs.
 

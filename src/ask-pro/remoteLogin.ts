@@ -254,12 +254,9 @@ export async function runRemoteLogin(onReady: (url: string) => void, savedProfil
     if (peers !== 0) throw Error("Browser busy. Wait for ask-pro runs to finish before --login.");
     const chrome =
       (await maybeReuseRunningChrome(profile, () => {})) ??
-      (await launchChrome(
-        resolveBrowserConfig({ manualLogin: true, headless: true }),
-        profile,
-        () => {},
-        { ignoreLockId: lock.lockId },
-      ));
+      (await launchChrome(resolveBrowserConfig({ manualLogin: true }), profile, () => {}, {
+        ignoreLockId: lock.lockId,
+      }));
     releaseChromeProcessHandle(chrome);
     if (chrome.pid) await writeChromePid(profile, chrome.pid);
     await writeDevToolsActivePort(profile, chrome.port);

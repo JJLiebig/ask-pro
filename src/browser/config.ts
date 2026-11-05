@@ -100,7 +100,7 @@ export function resolveBrowserConfig(
     cookieSyncWaitMs: config?.cookieSyncWaitMs ?? DEFAULT_BROWSER_CONFIG.cookieSyncWaitMs,
     inlineCookies: config?.inlineCookies ?? DEFAULT_BROWSER_CONFIG.inlineCookies,
     inlineCookiesSource: config?.inlineCookiesSource ?? DEFAULT_BROWSER_CONFIG.inlineCookiesSource,
-    headless: config?.headless ?? isHeadlessLinux(),
+    headless: config?.headless ?? false,
     keepBrowser: config?.keepBrowser ?? DEFAULT_BROWSER_CONFIG.keepBrowser,
     hideWindow: config?.hideWindow ?? DEFAULT_BROWSER_CONFIG.hideWindow,
     startMinimized: config?.startMinimized ?? DEFAULT_BROWSER_CONFIG.startMinimized,

@@ -8,13 +8,16 @@ as desktop Chrome. `ldd "$CHROME_PATH"` identifies missing libraries. Do not
 disable Chrome's sandbox. Ubuntu may require an administrator to allow its
 sandbox under the host's AppArmor policy.
 
-Without `DISPLAY` or `WAYLAND_DISPLAY`, ask-pro launches unified headless Chrome.
-With a display it retains headed operation. Profiles, run leases, launch locks,
+Without `DISPLAY` or `WAYLAND_DISPLAY`, install `Xvfb` (`sudo apt install xvfb`).
+ask-pro starts normal headed Chrome on its own private virtual display, for both
+login and queries. The display stays alive with retained Chrome across controller
+exits and is stopped when Chrome closes. With a desktop display, Chrome uses it.
+Profiles, run leases, launch locks,
 idle cache cleanup and graceful shutdown use the same lifecycle on both systems.
 State lives under `~/.agents/state/ask-pro`; `ASK_PRO_STATE_DIR` isolates tests.
 Never transfer a Windows profile to Linux; create a Linux profile and sign in once.
 
-## One manual login, no virtual display
+## One manual login
 
 On the host, set the private network address reachable from your devices:
 
@@ -40,7 +43,7 @@ relay and releases the launch lock; Chrome and its profile remain for resume.
 An expired link is replaced by running `--login` again. Do not run other ask-pro
 commands during login. Active browser runs prevent opening the login relay.
 If a query later returns `needs_auth`, run its emitted `login` command (which identifies the saved session profile), complete
-the same human flow, then resume. Headless queries return that handoff without
+the same human flow, then resume. Queries on a display-less host return that handoff without
 waiting for a nonexistent desktop window.
 
 ## Transport and alternatives
@@ -64,12 +67,13 @@ Desktop Chrome's `chrome://inspect` can also connect through an SSH tunnel to
 Chrome's loopback debugging port and offers its own screencast and input. That
 avoids a custom viewer but needs desktop DevTools and exposes full browser
 control. It is not a useful phone login path. The small relay supports both
-devices without VNC, Xvfb, display servers, or extra dependencies.
+devices without VNC. The virtual display is internal; the relay remains the human interface.
 
-Chrome documents headless remote interaction at
-[Debug in Headless mode](https://developer.chrome.com/docs/automation-and-testing/debug-headless).
-This proves the browser mechanism, not ChatGPT acceptance. ChatGPT or its
-identity provider can challenge or reject headless Chrome or a datacenter IP.
+Cloudflare rejected headless Chrome on the dev host while the same Chrome and IP
+reached ChatGPT when headed on Xvfb. Headed Chrome is therefore the default;
+explicit headless mode remains available to internal browser callers for fixtures.
+No user agent or automation signals are disguised. ChatGPT or its identity
+provider can still challenge or reject a browser or datacenter IP.
 A fixture pass cannot establish real login, Pro access, or a successful query.
 If the challenge cannot be completed, report it to the user; do not bypass it
 or copy session cookies. Real sign-in and one Pro query remain an attended gate.

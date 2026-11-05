@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import net from "node:net";
 import CDP from "chrome-remote-interface";
-import { DEFAULT_BROWSER_CONFIG, resolveBrowserConfig } from "./config.js";
+import { DEFAULT_BROWSER_CONFIG, resolveBrowserConfig, isHeadlessLinux } from "./config.js";
 import type {
   BrowserRunOptions,
   BrowserRunResult,
@@ -1688,7 +1688,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           : "Cloudflare challenge detected; leaving browser open so you can complete the check.",
       );
       logger(`Reuse this browser profile with: ${reuseProfileHint}`);
-      if (isLoginRequired && manualLogin) {
+      if (isLoginRequired && manualLogin && !isHeadlessLinux()) {
         const recoveryRuntime = client?.Runtime;
         if (!recoveryRuntime) {
           throw normalizedError;

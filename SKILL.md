@@ -11,7 +11,9 @@ The calling agent still owns the work. Use Pro for judgment, architecture, risk 
 
 ## Running ask-pro
 
-On a headless Linux host, set `CHROME_PATH` if Chrome is not discovered, and
+On a display-less Linux host, install Xvfb (`sudo apt install xvfb`); ask-pro
+manages a private display for headed Chrome during login and queries. Set
+`CHROME_PATH` if Chrome is not discovered, and
 `ASK_PRO_LOGIN_HOST` to the host's private Tailscale IP. Before the first query,
 run `ask-pro --login` and give the human its `login_url`. Keep that command alive
 while they sign in from their desktop or phone. The link expires after 15 minutes

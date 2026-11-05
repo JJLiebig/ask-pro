@@ -8,7 +8,7 @@ export const loginPage = `<!doctype html>
 <p id="status" role="status">Connecting…</p><img id="screen" tabindex="0" alt="Remote browser. Click a field, then type, or use the text box below.">
 <form><input id="text" type="password" autocomplete="off" aria-label="Text for selected browser field" placeholder="Type into selected field"><button>Send text</button><button type="button" id="enter">Enter</button><button type="button" id="tab">Tab</button><button type="button" id="backspace">Backspace</button><button type="button" id="up">Scroll up</button><button type="button" id="down">Scroll down</button></form></main>
 <script>
-const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);
+const token=location.hash.slice(1);
 const screen=document.querySelector('#screen'),tabs=document.querySelector('#tabs'),status=document.querySelector('#status'),text=document.querySelector('#text');
 let stopped=false,frameUrl,inputQueue=Promise.resolve();
 async function api(route,body){const r=await fetch(route,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});if(!r.ok)throw Error(r.status===401?'Link expired. Start ask-pro --login again.':'Connection failed. Retry or refresh tabs.');return r;}
