@@ -110,7 +110,13 @@ export async function startLoginServer(options: {
         // Reload cancels the image request. Release its pending CDP capture so
         // it cannot hold the shared request queue and freeze the new viewer.
         const cancel = () => {
-          if (!res.writableEnded) void c.close().catch(() => undefined);
+          if (!res.writableEnded) {
+            if (client === c) {
+              client = undefined;
+              targetId = undefined;
+            }
+            void c.close().catch(() => undefined);
+          }
         };
         res.once("close", cancel);
         let frame;
