@@ -118,6 +118,10 @@ export async function startLoginServer(options: {
             void c.close().catch(() => undefined);
           }
         };
+        if (res.destroyed) {
+          cancel();
+          return;
+        }
         res.once("close", cancel);
         let frame;
         try {

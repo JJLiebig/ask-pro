@@ -74,47 +74,61 @@ test("expires an unattended login link", async () => {
   await expect(fetch(new URL(relay.url).origin)).rejects.toThrow();
 });
 
-test("reconnects to the same tab after a viewer aborts a pending frame", async () => {
-  list.mockResolvedValue([{ id: "fixture", type: "page", url: "about:blank" }] as never);
-  let started!: () => void;
-  let rejectCapture!: (error: Error) => void;
-  const capturing = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  const first = {
-    on: vi.fn(),
-    Page: {
-      captureScreenshot: () => {
-        started();
-        return new Promise((_resolve, reject) => {
-          rejectCapture = reject;
-        });
+test.each(["connecting", "capturing"])(
+  "reconnects to the same tab after a viewer aborts while %s",
+  async (stage) => {
+    list.mockResolvedValue([{ id: "fixture", type: "page", url: "about:blank" }] as never);
+    let started!: () => void;
+    let rejectCapture!: (error: Error) => void;
+    let connected!: () => void;
+    const connection = new Promise<void>((resolve) => {
+      connected = resolve;
+    });
+    const capturing = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const first = {
+      on: vi.fn(),
+      Page: {
+        captureScreenshot: () => {
+          started();
+          return new Promise((_resolve, reject) => {
+            rejectCapture = reject;
+          });
+        },
       },
-    },
-    close: async () => {
-      rejectCapture(Error("closed"));
-    },
-  };
-  const second = {
-    on: vi.fn(),
-    Page: {
-      captureScreenshot: async () => ({ data: Buffer.from("fixture-image").toString("base64") }),
-    },
-    close: async () => {},
-  };
-  vi.mocked(CDP)
-    .mockResolvedValueOnce(first as never)
-    .mockResolvedValueOnce(second as never);
-  relay = await startLoginServer({ chromePort: 9222, host: "127.0.0.1" });
-  const url = new URL(relay.url);
-  const headers = { Authorization: "Bearer " + url.hash.slice(1) };
-  const abort = new AbortController();
-  const pending = fetch(url.origin + "/frame?target=fixture", { headers, signal: abort.signal });
-  const rejected = expect(pending).rejects.toThrow();
-  await capturing;
-  abort.abort();
-  await rejected;
-  const next = await fetch(url.origin + "/frame?target=fixture", { headers });
-  expect(next.status).toBe(200);
-  expect(await next.text()).toBe("fixture-image");
-});
+      close: async () => {
+        rejectCapture?.(Error("closed"));
+      },
+    };
+    const second = {
+      on: vi.fn(),
+      Page: {
+        captureScreenshot: async () => ({ data: Buffer.from("fixture-image").toString("base64") }),
+      },
+      close: async () => {},
+    };
+    vi.mocked(CDP)
+      .mockImplementationOnce(async () => {
+        if (stage === "connecting") {
+          started();
+          await connection;
+        }
+        return first as never;
+      })
+      .mockResolvedValueOnce(second as never);
+    relay = await startLoginServer({ chromePort: 9222, host: "127.0.0.1" });
+    const url = new URL(relay.url);
+    const headers = { Authorization: "Bearer " + url.hash.slice(1) };
+    const abort = new AbortController();
+    const pending = fetch(url.origin + "/frame?target=fixture", { headers, signal: abort.signal });
+    const rejected = expect(pending).rejects.toThrow();
+    await capturing;
+    abort.abort();
+    await rejected;
+    connected();
+    const next = await fetch(url.origin + "/frame?target=fixture", { headers });
+    expect(next.status).toBe(200);
+    expect(await next.text()).toBe("fixture-image");
+  },
+);
