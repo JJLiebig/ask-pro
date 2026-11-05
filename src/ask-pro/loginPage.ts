@@ -1,4 +1,5 @@
-// The browser relays human input only. Never persist input, frames, or the access key.
+// The browser relays human input only. Never persist input or frames.
+// Keep the short-lived access key in the URL fragment so reload preserves access.
 export const loginPage = `<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ask-pro sign in</title>

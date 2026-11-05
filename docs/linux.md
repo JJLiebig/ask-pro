@@ -50,6 +50,7 @@ waiting for a nonexistent desktop window.
 
 The relay uses an unguessable access key in the URL fragment, an authorization
 header for every frame and input request, no caching, and a 15-minute lifetime.
+The key stays in the URL fragment so the same link works after reloading.
 It forwards only screenshots, text, pointer and selected key events; it exposes
 no DOM, cookie, evaluation or arbitrary DevTools API. Input and frames are
 transient and are never written to logs or files. Treat the link as browser

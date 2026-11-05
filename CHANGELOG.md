@@ -4,8 +4,8 @@
 
 ### Added
 
-- Support headless Linux with a private `--login` browser link usable from a
-  desktop or phone, without a virtual display. Auto-detect Linux displays and
+- Support display-less Linux with a private `--login` browser link usable from a
+  desktop or phone and a managed virtual display. Auto-detect Linux displays and
   honor `CHROME_PATH` for custom Chrome installs.
 
 - Hand native ChatGPT clarification questions to the calling agent, including
