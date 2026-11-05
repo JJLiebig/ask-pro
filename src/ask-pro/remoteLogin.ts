@@ -107,7 +107,18 @@ export async function startLoginServer(options: {
       }
       if (req.method === "GET" && route.pathname === "/frame") {
         const c = await connect(route.searchParams.get("target") ?? "");
-        const frame = await c.Page.captureScreenshot({ format: "jpeg", quality: 70 });
+        // Reload cancels the image request. Release its pending CDP capture so
+        // it cannot hold the shared request queue and freeze the new viewer.
+        const cancel = () => {
+          if (!res.writableEnded) void c.close().catch(() => undefined);
+        };
+        res.once("close", cancel);
+        let frame;
+        try {
+          frame = await c.Page.captureScreenshot({ format: "jpeg", quality: 70 });
+        } finally {
+          res.removeListener("close", cancel);
+        }
         res.setHeader("Content-Type", "image/jpeg");
         res.end(Buffer.from(frame.data, "base64"));
         return;

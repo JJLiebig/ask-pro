@@ -114,9 +114,11 @@ try {
     awaitPromise: true,
   });
   // Reload must preserve authorization and resume frames without a replacement link.
+  const reloaded = viewer.Page.loadEventFired();
   await viewer.Page.reload();
+  await reloaded;
   await viewer.Runtime.evaluate({
-    expression: `new Promise(resolve=>{const t=setInterval(()=>{if(document.querySelector('#screen')?.naturalWidth){clearInterval(t);resolve(true)}},50)})`,
+    expression: `new Promise(resolve=>{const t=setInterval(()=>{if(document.querySelector('#tabs')?.options.length){clearInterval(t);resolve(true)}},50)})`,
     awaitPromise: true,
   });
   assert.equal(

@@ -1,5 +1,9 @@
 import { spawn, spawnSync, type SpawnOptions } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { randomBytes } from "node:crypto";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 // A separate supervisor outlives the controller when a browser is kept for resume.
 // Its PID represents the managed browser lifetime, including its private display.
@@ -19,9 +23,29 @@ export function spawnChromeWithVirtualDisplay(
 }
 
 async function supervise() {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ask-pro-display-"));
+  const authority = path.join(directory, "Xauthority");
+  const cookie = randomBytes(16);
+  const writeAuthority = async (number: string) => {
+    const fields = [
+      Buffer.alloc(0),
+      Buffer.from(number),
+      Buffer.from("MIT-MAGIC-COOKIE-1"),
+      cookie,
+    ];
+    const records = fields.map((field) => {
+      const length = Buffer.alloc(2);
+      length.writeUInt16BE(field.length);
+      return Buffer.concat([length, field]);
+    });
+    await writeFile(authority, Buffer.concat([Buffer.from([255, 255]), ...records]), {
+      mode: 0o600,
+    });
+  };
+  await writeAuthority("");
   const display = spawn(
     "Xvfb",
-    ["-displayfd", "3", "-screen", "0", "1280x800x24", "-nolisten", "tcp"],
+    ["-displayfd", "3", "-screen", "0", "1280x800x24", "-nolisten", "tcp", "-auth", authority],
     {
       stdio: ["ignore", "ignore", "inherit", "pipe"],
     },
@@ -45,8 +69,9 @@ async function supervise() {
         if (/^\d+\n$/.test(output)) resolve(output.trim());
       });
     }).finally(() => clearTimeout(timer));
+    await writeAuthority(number);
     chrome = spawn(process.argv[3]!, process.argv.slice(4), {
-      env: { ...process.env, DISPLAY: `:${number}` },
+      env: { ...process.env, DISPLAY: `:${number}`, XAUTHORITY: authority },
       stdio: "inherit",
     });
     display.once("exit", () => chrome?.kill("SIGTERM"));
@@ -56,6 +81,7 @@ async function supervise() {
     });
   } finally {
     display.kill();
+    await rm(directory, { recursive: true, force: true });
   }
 }
 
