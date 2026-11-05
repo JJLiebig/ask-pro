@@ -75,7 +75,9 @@ in chat, put them in a command argument, or save them in a repository.
 
 Wait for other ask-pro runs to finish before importing. The import holds the
 profile launch lock, replaces only matching ChatGPT session-cookie variants,
-checks login and closes Chrome to flush the cookies. It stores cookies only in
+checks login and closes newly launched Chrome to flush the cookies. If Chrome
+was already retained for recovery, it keeps that browser and its other tabs
+open, closing only the import tab; Chrome flushes cookies in its usual lifecycle. It stores cookies only in
 Chrome's profile, with the expiry you provided; it never writes them to ask-pro
 session logs. Existing local Cloudflare cookies are left to the browser. State
 lives under `~/.agents/state/ask-pro`; `ASK_PRO_STATE_DIR` selects a different

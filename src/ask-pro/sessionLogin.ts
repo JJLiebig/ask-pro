@@ -102,19 +102,22 @@ export async function runSessionLogin(
   if (!lock) throw Error("Browser busy. Wait for ask-pro runs to finish.");
   let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
   let client: Awaited<ReturnType<typeof CDP>> | undefined;
+  let reused = false;
+  let targetId: string | undefined;
   try {
     const lease = await createManagedChromeRunLease(profile);
     const peers = await releaseManagedChromeRunLeaseAndCountPeers(profile, lease);
     if (peers !== 0) throw Error("Browser busy. Wait for ask-pro runs to finish.");
-    chrome =
-      (await maybeReuseRunningChrome(profile, () => {})) ??
-      (await launchChrome(resolveBrowserConfig({ manualLogin: true }), profile, () => {}, {
-        ignoreLockId: lock.lockId,
-      }));
+    chrome = (await maybeReuseRunningChrome(profile, () => {})) ?? undefined;
+    reused = Boolean(chrome);
+    chrome ??= await launchChrome(resolveBrowserConfig({ manualLogin: true }), profile, () => {}, {
+      ignoreLockId: lock.lockId,
+    });
     releaseChromeProcessHandle(chrome);
     if (chrome.pid) await writeChromePid(profile, chrome.pid);
     await writeDevToolsActivePort(profile, chrome.port);
     const target = await CDP.New({ port: chrome.port, url: "about:blank" });
+    targetId = target.id;
     client = await CDP({ port: chrome.port, target: target.id });
     if (cookies) {
       await replaceSessionCookies(client.Network, cookies);
@@ -136,9 +139,13 @@ export async function runSessionLogin(
     );
   } finally {
     await client?.close().catch(() => undefined);
-    // Import always flushes persistent cookies to disk; desktop login stays visible.
+    // A retained browser can have recoverable response tabs despite having no live lease.
     try {
-      if (cookies && chrome) await closeChromeGracefully(chrome);
+      if (cookies && chrome) {
+        if (!reused) await closeChromeGracefully(chrome);
+        else if (targetId)
+          await CDP.Close({ port: chrome.port, id: targetId }).catch(() => undefined);
+      }
     } finally {
       await lock.release();
     }
