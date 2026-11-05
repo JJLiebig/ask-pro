@@ -4,8 +4,8 @@
 
 ### Added
 
-- Support headless Linux with a private `--login` browser link usable from a
-  desktop or phone, without a virtual display. Auto-detect Linux displays and
+- Support display-less Linux with a private `--login` browser link usable from a
+  desktop or phone and a managed virtual display. Auto-detect Linux displays and
   honor `CHROME_PATH` for custom Chrome installs.
 
 - Hand native ChatGPT clarification questions to the calling agent, including
@@ -23,6 +23,9 @@
 - Publish `ask-pro` to npm after each passing main-branch CI run.
 
 ### Fixed
+
+- Use headed Chrome on a managed private Xvfb display on display-less Linux hosts,
+  avoiding the headless-only Cloudflare block. Keep remote login links usable on reload.
 
 - Limit managed Chrome's disk cache to 16 MiB and clear idle profiles' page and
   code caches before launch, preserving sign-in data and active browser runs.

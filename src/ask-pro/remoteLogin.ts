@@ -107,7 +107,28 @@ export async function startLoginServer(options: {
       }
       if (req.method === "GET" && route.pathname === "/frame") {
         const c = await connect(route.searchParams.get("target") ?? "");
-        const frame = await c.Page.captureScreenshot({ format: "jpeg", quality: 70 });
+        // Reload cancels the image request. Release its pending CDP capture so
+        // it cannot hold the shared request queue and freeze the new viewer.
+        const cancel = () => {
+          if (!res.writableEnded) {
+            if (client === c) {
+              client = undefined;
+              targetId = undefined;
+            }
+            void c.close().catch(() => undefined);
+          }
+        };
+        if (res.destroyed) {
+          cancel();
+          return;
+        }
+        res.once("close", cancel);
+        let frame;
+        try {
+          frame = await c.Page.captureScreenshot({ format: "jpeg", quality: 70 });
+        } finally {
+          res.removeListener("close", cancel);
+        }
         res.setHeader("Content-Type", "image/jpeg");
         res.end(Buffer.from(frame.data, "base64"));
         return;
@@ -254,12 +275,9 @@ export async function runRemoteLogin(onReady: (url: string) => void, savedProfil
     if (peers !== 0) throw Error("Browser busy. Wait for ask-pro runs to finish before --login.");
     const chrome =
       (await maybeReuseRunningChrome(profile, () => {})) ??
-      (await launchChrome(
-        resolveBrowserConfig({ manualLogin: true, headless: true }),
-        profile,
-        () => {},
-        { ignoreLockId: lock.lockId },
-      ));
+      (await launchChrome(resolveBrowserConfig({ manualLogin: true }), profile, () => {}, {
+        ignoreLockId: lock.lockId,
+      }));
     releaseChromeProcessHandle(chrome);
     if (chrome.pid) await writeChromePid(profile, chrome.pid);
     await writeDevToolsActivePort(profile, chrome.port);

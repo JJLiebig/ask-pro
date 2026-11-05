@@ -113,6 +113,18 @@ try {
     expression: `new Promise(resolve=>{const t=setInterval(()=>{if(document.querySelector('#tabs')?.options.length){clearInterval(t);resolve(true)}},50)})`,
     awaitPromise: true,
   });
+  // Reload must preserve authorization and resume frames without a replacement link.
+  const reloaded = viewer.Page.loadEventFired();
+  await viewer.Page.reload();
+  await reloaded;
+  await viewer.Runtime.evaluate({
+    expression: `new Promise(resolve=>{const t=setInterval(()=>{if(document.querySelector('#tabs')?.options.length){clearInterval(t);resolve(true)}},50)})`,
+    awaitPromise: true,
+  });
+  assert.equal(
+    (await viewer.Runtime.evaluate({ expression: "location.hash" })).result.value,
+    url.hash,
+  );
   await viewer.Runtime.evaluate({
     expression: `document.querySelector('#tabs').value=${JSON.stringify(target.id)}`,
   });

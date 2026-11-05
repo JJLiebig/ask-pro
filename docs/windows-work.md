@@ -83,6 +83,9 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 
 Future Windows gotchas belong here.
 
+- Linux virtual-display supervision is Linux-only; Windows keeps its existing
+  broker and native window behavior. Login links now retain their fragment on reload.
+
 - `--login` is an explicit remote sign-in relay; ordinary Windows runs keep their
   native window behavior. It does not inspect credentials or migrate profiles
   between operating systems. Its HTTP server is tested with disposable fixtures.

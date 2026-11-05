@@ -29,6 +29,7 @@
     "dist/src/browser/attachRunning.js",
     "dist/src/browser/chatgptModelCatalog.js",
     "dist/src/browser/chromeLifecycle.js",
+    "dist/src/browser/linuxChrome.js",
     "dist/src/browser/config.js",
     "dist/src/browser/constants.js",
     "dist/src/browser/cookies.js",

@@ -27,15 +27,11 @@ afterEach(async () => {
 });
 
 describe("resolveBrowserConfig", () => {
-  test("uses headless Chrome without a Linux display, honors explicit headed mode and custom Chrome", () => {
+  test("honors a custom Chrome path without a desktop display", () => {
     vi.stubEnv("DISPLAY", "");
     vi.stubEnv("WAYLAND_DISPLAY", "");
     vi.stubEnv("CHROME_PATH", "/custom/chrome");
-    expect(resolveBrowserConfig(undefined).headless).toBe(process.platform === "linux");
-    expect(resolveBrowserConfig({ headless: false }).headless).toBe(false);
     expect(resolveBrowserConfig(undefined).chromePath).toBe("/custom/chrome");
-    vi.stubEnv("DISPLAY", ":1");
-    expect(resolveBrowserConfig(undefined).headless).toBe(false);
   });
   test("returns defaults when config missing", () => {
     const resolved = resolveBrowserConfig(undefined);

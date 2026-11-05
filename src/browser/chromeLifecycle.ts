@@ -22,6 +22,8 @@ import {
 import { delay } from "./utils.js";
 import { formatElapsed } from "./format.js";
 import { withTimeout } from "./reattachHelpers.js";
+import { isHeadlessLinux } from "./config.js";
+import { spawnChromeWithVirtualDisplay } from "./linuxChrome.js";
 
 const execFileAsync = promisify(execFile);
 const CPU_THROTTLING_OVERRIDE_FLAGS = new Set([
@@ -989,7 +991,9 @@ export function spawnWindowsProcessOutsideJob(
 const spawnManagedChrome = ((command: string, args: readonly string[], options: SpawnOptions) =>
   process.platform === "win32"
     ? spawnWindowsProcessOutsideJob(command, args, options)
-    : spawn(command, args, options)) as typeof spawn;
+    : isHeadlessLinux() && !args.some((arg) => arg.startsWith("--headless"))
+      ? spawnChromeWithVirtualDisplay(command, args, options)
+      : spawn(command, args, options)) as typeof spawn;
 
 async function launchManagedChrome({
   chromeFlags,
