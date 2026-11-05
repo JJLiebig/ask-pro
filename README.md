@@ -37,9 +37,11 @@ uses it where it is and moves it on a later run.
 
 ## Browser and session state
 
-ask-pro never asks for, types, reads, or logs passwords, MFA codes, recovery
-codes, session cookies, or raw auth tokens. A new browser profile may need one
-manual ChatGPT login. On Windows, ordinary managed Chrome runs start minimized
+Agents never ask for, type, read, or log passwords, MFA codes, recovery codes,
+session cookies, or raw auth tokens. A new browser profile needs a human login.
+On headless machines, the human imports session cookies directly through stdin
+with `--import-session`; see [Linux setup](docs/linux.md). On a desktop, use
+`--login` for manual ChatGPT sign-in. On Windows, ordinary managed Chrome runs start minimized
 and are hidden; login and recovery restore the window for human action.
 
 ask-pro keeps its state in `~/.agents/state/ask-pro/`: the persistent browser

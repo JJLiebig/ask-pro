@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import "dotenv/config";
-import { runRemoteLogin } from "../src/ask-pro/remoteLogin.js";
+import { isHeadlessLinux } from "../src/browser/config.js";
+import { parseSessionCookies, runSessionLogin } from "../src/ask-pro/sessionLogin.js";
 import { AssistantStoppedError } from "../src/browser/errors.js";
 import { AssistantQuestionsError } from "../src/browser/actions/questions.js";
 import { readAskProQuestions } from "../src/ask-pro/questions.js";
@@ -37,6 +38,7 @@ import { getCliVersion } from "../src/version.js";
 
 interface AskProOptions {
   login?: boolean | string;
+  importSession?: boolean | string;
   dryRun?: boolean;
   files?: string[];
   promptFile?: string;
@@ -64,8 +66,29 @@ program
   .addOption(
     new Option(
       "--login [session-id]",
-      "open a private remote sign-in link for headless Chrome",
+      "open ChatGPT for human sign-in on a machine with a display",
     ).conflicts([
+      "importSession",
+      "dryRun",
+      "files",
+      "promptFile",
+      "answers",
+      "artifacts",
+      "github",
+      "responseZip",
+      "resume",
+      "status",
+      "harvest",
+      "copy",
+      "temporary",
+    ]),
+  )
+  .addOption(
+    new Option(
+      "--import-session [session-id]",
+      "import session cookies from stdin and check login without a query",
+    ).conflicts([
+      "login",
       "dryRun",
       "files",
       "promptFile",
@@ -123,23 +146,31 @@ await program.parseAsync(process.argv);
 
 async function runAskPro(question: string, options: AskProOptions): Promise<void> {
   const cwd = resolveProjectCwd(options);
-  if (options.login) {
-    if (question.trim()) throw new Error("Use --login without a question.");
+  if (options.login || options.importSession) {
+    if (question.trim()) throw new Error("Use login/import without a question.");
+    const selected = options.importSession ?? options.login;
     const profile =
-      typeof options.login === "string"
-        ? await resolveAskProLoginProfile(cwd, options.login)
-        : undefined;
-    await runRemoteLogin(
-      (url) =>
-        writeToon("ask_pro", {
-          state: "needs_auth",
-          action: "open_login_url",
-          login_url: url,
-          expires_minutes: 15,
-        }),
-      profile,
-    );
-    writeToon("ask_pro", { state: "login_closed", action: "confirm_composer_then_resume" });
+      typeof selected === "string" ? await resolveAskProLoginProfile(cwd, selected) : undefined;
+    let cookies;
+    if (options.importSession) {
+      // The human supplies stdin directly; never echo input or include parser/CDP errors.
+      let input = "";
+      for await (const chunk of process.stdin) input += chunk;
+      cookies = parseSessionCookies(input);
+    }
+    const loggedIn = await runSessionLogin(cookies, profile);
+    writeToon("ask_pro", {
+      state: loggedIn ? "ready" : "needs_auth",
+      action: loggedIn
+        ? "resume_or_start_query"
+        : options.importSession
+          ? "check_session_import_guidance"
+          : "human_login_then_resume",
+      ...(!loggedIn && options.importSession
+        ? { guide: "https://github.com/JJLiebig/ask-pro/blob/main/docs/linux.md" }
+        : {}),
+    });
+    if (options.importSession && !loggedIn) process.exitCode = 1;
     return;
   }
   if (options.answers && question.trim())
@@ -459,10 +490,11 @@ async function printAuthInstructions(
     reason: error.reason,
     ...fallbackPreflight,
     ...browserPreflight,
-    action: "human_login_then_resume",
-    ...(process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
+    action: isHeadlessLinux() ? "human_import_session_then_resume" : "human_login_then_resume",
+    ...(isHeadlessLinux()
       ? {
-          login: `${buildLauncherCommand()} --cwd ${quoteCommandArg(cwd)} --login ${quoteCommandArg(sessionId)}`,
+          guide: "https://github.com/JJLiebig/ask-pro/blob/main/docs/linux.md",
+          import: `${buildLauncherCommand()} --cwd ${quoteCommandArg(cwd)} --import-session ${quoteCommandArg(sessionId)}`,
         }
       : {}),
     resume: resumeCommand,
@@ -494,6 +526,10 @@ function printStatusRecord(status: AskProStatusFile, extra: AskProToonFields = {
     reason: status.reason,
     temporary: normalizeTemporary(status.temporary),
     github: status.github || undefined,
+    guide:
+      status.status === "NEEDS_USER_AUTH" && isHeadlessLinux()
+        ? "https://github.com/JJLiebig/ask-pro/blob/main/docs/linux.md"
+        : undefined,
     setup_url: status.status === "NEEDS_GITHUB_CONNECTION" ? GITHUB_SETUP_URL : undefined,
     help:
       status.status === "NEEDS_GITHUB_CONNECTION"
@@ -551,7 +587,7 @@ function actionForStatus(status: AskProStatusFile): string {
     case "FAILED":
       return "resume";
     case "NEEDS_USER_AUTH":
-      return "human_login_then_resume";
+      return isHeadlessLinux() ? "human_import_session_then_resume" : "human_login_then_resume";
     case "COMPLETED":
       return "harvest";
     case "HARVESTED":

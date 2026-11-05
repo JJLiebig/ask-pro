@@ -86,9 +86,10 @@ Future Windows gotchas belong here.
 - Linux virtual-display supervision is Linux-only; Windows keeps its existing
   broker and native window behavior. Login links now retain their fragment on reload.
 
-- `--login` is an explicit remote sign-in relay; ordinary Windows runs keep their
-  native window behavior. It does not inspect credentials or migrate profiles
-  between operating systems. Its HTTP server is tested with disposable fixtures.
+- `--login` opens the native browser for human sign-in; the remote relay is removed.
+  `--import-session` reads JSON from stdin, never argv. Validation uses only fake
+  values and temporary `ASK_PRO_STATE_DIR`; real profile cookies are off limits.
+  Imports preserve the supplied expiry so cookies survive a clean Chrome restart.
 
 - Managed Chrome uses a 16 MiB disk-cache limit. Before a fresh launch, ask-pro
   clears only `Default/Cache` and `Default/Code Cache` under the selected shared
