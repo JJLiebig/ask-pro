@@ -399,6 +399,7 @@ async function resumeAskProBrowserSessionWithLease({
         : (metadata.url ?? ASK_PRO_TEMPORARY_CHATGPT_URL);
   const fallbackProfile = await resolveResumeBrowserProfile(metadata);
   if (
+    (sessionStatus.status === "NEEDS_USER_AUTH" && metadata.runtime?.promptSubmitted === false) ||
     sessionStatus.status === "NEEDS_GITHUB_CONNECTION" ||
     (sessionStatus.github && metadata.runtime?.githubCheckPending === true)
   ) {
@@ -1091,6 +1092,7 @@ interface AskProBrowserMetadata {
   chromeMode?: "launching" | "launched" | "reattaching" | "reused_devtools" | "relaunched";
   runtime?: {
     githubCheckPending?: boolean;
+    promptSubmitted?: boolean;
     chromePid?: number;
     chromePort?: number;
     chromeHost?: string;

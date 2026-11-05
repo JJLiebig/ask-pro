@@ -19,6 +19,7 @@ export interface BrowserAttachment {
 
 export interface BrowserRuntimeMetadata {
   githubCheckPending?: boolean;
+  promptSubmitted?: boolean;
   browserTransport?: "cdp";
   chromePid?: number;
   chromePort?: number;

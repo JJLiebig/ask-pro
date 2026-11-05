@@ -597,7 +597,11 @@ describe("ask-pro cli", () => {
 
     expect(stderr).toBe("");
     expect(stdout).toContain("  state: needs_auth\n");
-    expect(stdout).toContain("  action: human_login_then_resume\n");
+    expect(stdout).toContain(
+      process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
+        ? "  action: human_import_session_then_resume\n"
+        : "  action: human_login_then_resume\n",
+    );
     expect(stdout).not.toContain("  profile: ");
     expect(stdout).not.toContain("  profile_path: ");
     expect(stdout).toContain('  resume: "ask-pro --resume ');

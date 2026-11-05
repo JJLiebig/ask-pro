@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import "dotenv/config";
-import { runRemoteLogin } from "../src/ask-pro/remoteLogin.js";
+import { launchHumanCheck } from "../src/ask-pro/humanCheck.js";
+import { isHeadlessLinux } from "../src/browser/config.js";
+import { parseSessionCookies, runSessionLogin } from "../src/ask-pro/sessionLogin.js";
 import { AssistantStoppedError } from "../src/browser/errors.js";
 import { AssistantQuestionsError } from "../src/browser/actions/questions.js";
 import { readAskProQuestions } from "../src/ask-pro/questions.js";
@@ -37,6 +39,7 @@ import { getCliVersion } from "../src/version.js";
 
 interface AskProOptions {
   login?: boolean | string;
+  importSession?: boolean | string;
   dryRun?: boolean;
   files?: string[];
   promptFile?: string;
@@ -64,8 +67,29 @@ program
   .addOption(
     new Option(
       "--login [session-id]",
-      "open a private remote sign-in link for headless Chrome",
+      "open ChatGPT for human sign-in on a machine with a display",
     ).conflicts([
+      "importSession",
+      "dryRun",
+      "files",
+      "promptFile",
+      "answers",
+      "artifacts",
+      "github",
+      "responseZip",
+      "resume",
+      "status",
+      "harvest",
+      "copy",
+      "temporary",
+    ]),
+  )
+  .addOption(
+    new Option(
+      "--import-session [session-id]",
+      "import session cookies from stdin and check login without a query",
+    ).conflicts([
+      "login",
       "dryRun",
       "files",
       "promptFile",
@@ -123,23 +147,31 @@ await program.parseAsync(process.argv);
 
 async function runAskPro(question: string, options: AskProOptions): Promise<void> {
   const cwd = resolveProjectCwd(options);
-  if (options.login) {
-    if (question.trim()) throw new Error("Use --login without a question.");
+  if (options.login || options.importSession) {
+    if (question.trim()) throw new Error("Use login/import without a question.");
+    const selected = options.importSession ?? options.login;
     const profile =
-      typeof options.login === "string"
-        ? await resolveAskProLoginProfile(cwd, options.login)
-        : undefined;
-    await runRemoteLogin(
-      (url) =>
-        writeToon("ask_pro", {
-          state: "needs_auth",
-          action: "open_login_url",
-          login_url: url,
-          expires_minutes: 15,
-        }),
-      profile,
-    );
-    writeToon("ask_pro", { state: "login_closed", action: "confirm_composer_then_resume" });
+      typeof selected === "string" ? await resolveAskProLoginProfile(cwd, selected) : undefined;
+    let cookies;
+    if (options.importSession) {
+      // The human supplies stdin directly; never echo input or include parser/CDP errors.
+      let input = "";
+      for await (const chunk of process.stdin) input += chunk;
+      cookies = parseSessionCookies(input);
+    }
+    const loggedIn = await runSessionLogin(cookies, profile);
+    writeToon("ask_pro", {
+      state: loggedIn ? "ready" : "needs_auth",
+      action: loggedIn
+        ? "resume_or_start_query"
+        : options.importSession
+          ? "check_session_import_guidance"
+          : "human_login_then_resume",
+      ...(!loggedIn && options.importSession
+        ? { guide: "https://github.com/JJLiebig/ask-pro/blob/main/docs/linux.md" }
+        : {}),
+    });
+    if (options.importSession && !loggedIn) process.exitCode = 1;
     return;
   }
   if (options.answers && question.trim())
@@ -330,6 +362,7 @@ async function submitOrResumeBrowserSession(
     status.status === "NEEDS_GITHUB_CONNECTION"
   ) {
     try {
+      await closeHumanCheckViewer(cwd, sessionId);
       await resumeAskProBrowserSession({
         cwd,
         sessionId,
@@ -448,6 +481,27 @@ async function printAuthInstructions(
   error: AskProNeedsAuthError,
 ): Promise<void> {
   const resumeCommand = buildResumeCommand(sessionId, options, cwd);
+  if (isHeadlessLinux() && error.reason === "challenge_detected") {
+    const paths = getAskProSessionPaths(cwd, sessionId);
+    const metadata = JSON.parse(await fs.readFile(paths.browser, "utf8"));
+    const { chromePort, chromeTargetId } = metadata.runtime ?? {};
+    if (!chromePort || !chromeTargetId)
+      throw new Error("Challenge browser is unavailable. Resume ask-pro to reopen it.");
+    const checkUrl = await launchHumanCheck({
+      chromePort,
+      targetId: chromeTargetId,
+      profile: error.browserProfile,
+    });
+    await fs.writeFile(path.join(paths.dir, "human-check.json"), JSON.stringify({ url: checkUrl }));
+    writeToon("ask_pro", {
+      session: sessionId,
+      state: "needs_human_check",
+      check_url: checkUrl,
+      action: "human_check_then_resume",
+      resume: resumeCommand,
+    });
+    return;
+  }
   const fallbackPreflight = {
     profile: profileMode(error.browserProfile),
     profile_path: collapseHome(error.browserProfile),
@@ -459,10 +513,11 @@ async function printAuthInstructions(
     reason: error.reason,
     ...fallbackPreflight,
     ...browserPreflight,
-    action: "human_login_then_resume",
-    ...(process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY
+    action: isHeadlessLinux() ? "human_import_session_then_resume" : "human_login_then_resume",
+    ...(isHeadlessLinux()
       ? {
-          login: `${buildLauncherCommand()} --cwd ${quoteCommandArg(cwd)} --login ${quoteCommandArg(sessionId)}`,
+          guide: "https://github.com/JJLiebig/ask-pro/blob/main/docs/linux.md",
+          import: `${buildLauncherCommand()} --cwd ${quoteCommandArg(cwd)} --import-session ${quoteCommandArg(sessionId)}`,
         }
       : {}),
     resume: resumeCommand,
@@ -494,6 +549,10 @@ function printStatusRecord(status: AskProStatusFile, extra: AskProToonFields = {
     reason: status.reason,
     temporary: normalizeTemporary(status.temporary),
     github: status.github || undefined,
+    guide:
+      status.status === "NEEDS_USER_AUTH" && isHeadlessLinux()
+        ? "https://github.com/JJLiebig/ask-pro/blob/main/docs/linux.md"
+        : undefined,
     setup_url: status.status === "NEEDS_GITHUB_CONNECTION" ? GITHUB_SETUP_URL : undefined,
     help:
       status.status === "NEEDS_GITHUB_CONNECTION"
@@ -551,7 +610,7 @@ function actionForStatus(status: AskProStatusFile): string {
     case "FAILED":
       return "resume";
     case "NEEDS_USER_AUTH":
-      return "human_login_then_resume";
+      return isHeadlessLinux() ? "human_import_session_then_resume" : "human_login_then_resume";
     case "COMPLETED":
       return "harvest";
     case "HARVESTED":
@@ -633,6 +692,22 @@ async function readBrowserPreflightForSession(
   const profileDir = typeof metadata.profileDir === "string" ? metadata.profileDir : undefined;
   const profile = profileMode(profileDir);
   const questions: AskProToonFields = {};
+  if (
+    metadata.status === "needs_user_auth" &&
+    metadata.reason === "challenge_detected" &&
+    isHeadlessLinux()
+  ) {
+    const check = await fs
+      .readFile(path.join(getAskProSessionPaths(cwd, sessionId).dir, "human-check.json"), "utf8")
+      .then(JSON.parse)
+      .catch(() => null);
+    if (check?.url)
+      Object.assign(questions, {
+        state: "needs_human_check",
+        check_url: check.url,
+        action: "human_check_then_resume",
+      });
+  }
   if (metadata.status === "awaiting_answers") {
     const request = await readAskProQuestions(getAskProSessionPaths(cwd, sessionId).dir);
     questions.request_id = request.requestId;
@@ -710,6 +785,7 @@ function isConversationUrl(value: string): boolean {
 }
 
 interface BrowserMetadata {
+  reason?: string;
   status?: string;
   profileDir?: string;
   agentId?: string | null;
@@ -753,4 +829,20 @@ function classifyCliError(message: string): string {
     return "browser_failed";
   }
   return "failed";
+}
+
+async function closeHumanCheckViewer(cwd: string, sessionId: string): Promise<void> {
+  const file = path.join(getAskProSessionPaths(cwd, sessionId).dir, "human-check.json");
+  const check = await fs
+    .readFile(file, "utf8")
+    .then(JSON.parse)
+    .catch(() => null);
+  if (!check?.url) return;
+  const url = new URL(check.url);
+  await fetch(`http://127.0.0.1:${url.port}/close`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${url.hash.slice(1)}` },
+    signal: AbortSignal.timeout(2000),
+  }).catch(() => undefined);
+  await fs.rm(file, { force: true });
 }
