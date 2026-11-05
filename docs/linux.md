@@ -11,7 +11,11 @@ ask-pro runs headed Chrome on a private Xvfb display when neither `DISPLAY` nor
 `WAYLAND_DISPLAY` exists. The display follows Chrome's lifetime. Headless Chrome
 was blocked by Cloudflare on the dev host while headed Chrome could reach
 chatgpt.com. The identity provider still blocked login on that datacenter IP,
-so remote sign-in forwarding has been removed. With a desktop, `--login` opens
+so remote sign-in forwarding has been removed. A later attended check also
+encountered ChatGPT's interactive human-verification checkbox on that IP after
+session import. Import fixes the login transfer only: a server whose IP
+Cloudflare challenges can keep hitting the human check, including on queries.
+Do not click or automate that checkbox. With a desktop, `--login` opens
 Chrome for manual sign-in.
 
 ## Import your personal-browser session

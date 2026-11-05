@@ -19,6 +19,8 @@ browser and imports only the session cookies directly through stdin with
 send cookies to the agent or paste them in chat. A later `needs_auth` result
 includes an `import` command for the saved profile. Import checks login without
 sending a query; after `ready`, resume the saved session or start the requested query.
+Session import transfers login only; a server IP challenged by Cloudflare can
+still hit a human check on queries. Do not automate the verification checkbox.
 On a desktop, `--login` opens Chrome for human sign-in.
 
 This skill folder contains ask-pro itself; nothing else needs installing. In
