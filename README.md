@@ -28,7 +28,8 @@ Both installs run the same bundled launcher. The `ask-pro` npm package
 
 You need Node.js 24+, npm, Chrome, and a ChatGPT account with Pro access. The
 browser runtime supports Windows and Linux. Linux without `DISPLAY` or
-`WAYLAND_DISPLAY` uses headless Chrome. See [Linux setup and remote sign-in](docs/linux.md).
+`WAYLAND_DISPLAY` runs Chrome on a private Xvfb display. See
+[Linux and session import](docs/linux.md).
 
 **Upgrading from an earlier version:** nothing to do. On its first run,
 ask-pro moves your signed-in browser profiles from `~/.codex/state/ask-pro` to

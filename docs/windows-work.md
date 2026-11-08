@@ -84,7 +84,7 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 Future Windows gotchas belong here.
 
 - Linux virtual-display supervision is Linux-only; Windows keeps its existing
-  broker and native window behavior. Login links now retain their fragment on reload.
+  broker and native window behavior.
 
 - `--login` opens the native browser for human sign-in; the remote relay is removed.
   `--import-session` reads JSON from stdin, never argv. Validation uses only fake
