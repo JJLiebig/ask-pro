@@ -140,6 +140,11 @@ export async function startHumanCheckServer(
             return;
           }
           const frame = await c.Page.captureScreenshot({ format: "jpeg", quality: 70 });
+          // The challenge can redirect during capture; never forward a frame of the page behind it.
+          if (!(await pending(c))) {
+            markCleared(res);
+            return;
+          }
           res.setHeader("Content-Type", "image/jpeg");
           res.end(Buffer.from(frame.data, "base64"));
         } finally {
