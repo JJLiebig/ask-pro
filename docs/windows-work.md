@@ -18,7 +18,7 @@ Read this when working on `ask_pro` from Windows and add new findings here.
 - `npx skills add` and the Codex marketplace plugin both install the whole
   repo. Its launcher,
   `scripts\ask-pro.mjs`, installs, builds, and executes under
-  `...\state\ask-pro\runtimes\<install>\<version>-<hash>\`, never in the
+  `...\state\ask-pro\runtimes\<install>\<hash>\`, never in the
   installed skill folder. Each installed skill folder has its own `<install>`
   group, so separate installs never remove each other's builds. Once a new build
   is running, the launcher removes every other build in its group that no
