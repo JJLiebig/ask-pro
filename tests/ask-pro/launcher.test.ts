@@ -44,13 +44,7 @@ async function installSkill(prefix: string) {
   await fs.mkdir(path.dirname(launcher), { recursive: true });
   await fs.mkdir(path.dirname(cli), { recursive: true });
   await fs.copyFile(path.join(repoRoot, "scripts", "ask-pro.mjs"), launcher);
-  const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
-  packageJson.version = "1.2.3";
-  await fs.writeFile(
-    path.join(skillRoot, "package.json"),
-    `${JSON.stringify(packageJson, null, 2)}\n`,
-  );
-  for (const file of ["pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
+  for (const file of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]) {
     await fs.copyFile(path.join(repoRoot, file), path.join(skillRoot, file));
   }
   const writeCli = (revision: number) =>
@@ -96,7 +90,7 @@ describe("skill launcher", () => {
     expect(first.dependencyResolved).toBe(true);
     const installRoot = path.dirname(firstBuild);
     expect(path.dirname(installRoot)).toBe(skill.runtimes);
-    expect(path.basename(firstBuild)).toMatch(/^1\.2\.3-[a-f0-9]{16}$/);
+    expect(path.basename(firstBuild)).toMatch(/^[a-f0-9]{8}$/);
     expect(first.args).toEqual(["status"]);
     expect(first.launcher).toContain(skill.launcher);
     expect(await fs.realpath(first.initCwd)).toBe(await fs.realpath(skill.projectCwd));
