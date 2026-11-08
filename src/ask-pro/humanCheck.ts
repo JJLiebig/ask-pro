@@ -51,7 +51,9 @@ export async function startHumanCheckServer(
       expression: `(() => {
       if (location.origin !== ${JSON.stringify(options.origin ?? "https://chatgpt.com")}) return false;
       const visible = el => { const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'; };
-      return document.title.toLowerCase().includes('just a moment') || Array.from(document.querySelectorAll('iframe[src*="challenges.cloudflare.com"],iframe[src*="/challenge-platform/"]')).some(visible);
+      if (document.title.toLowerCase().includes('just a moment')) return true;
+      if (Array.from(document.querySelectorAll('iframe[src*="challenges.cloudflare.com"],iframe[src*="/challenge-platform/" i],iframe[src*="captcha" i]')).some(visible)) return true;
+      return Array.from(document.querySelectorAll('form,[role="dialog"]')).some(el => visible(el) && !el.querySelector('textarea,[contenteditable="true"]') && /\\b(security check|verify you are human|captcha)\\b/i.test(el.textContent || ''));
     })()`,
       returnByValue: true,
     });
@@ -118,14 +120,34 @@ export async function startHumanCheckServer(
         res.writeHead(204).end();
         return;
       }
+      let point: { x: number; y: number } | undefined;
+      if (req.url === "/click") {
+        let raw = "";
+        for await (const chunk of req) {
+          raw += chunk;
+          if (Buffer.byteLength(raw) > 1024) {
+            res.writeHead(413).end();
+            return;
+          }
+        }
+        point = JSON.parse(raw) as { x: number; y: number };
+        if (
+          ![point.x, point.y].every((v) => typeof v === "number" && Number.isFinite(v) && v >= 0)
+        ) {
+          res.writeHead(400).end();
+          return;
+        }
+      }
       if (res.destroyed) return;
       const c = await connect();
       if (res.destroyed) return;
+      // Check immediately before input, so a challenge that cleared meanwhile never receives a click.
+      if (point) await c.Page.bringToFront();
       if (!(await pending(c))) {
         markCleared(res);
         return;
       }
-      if (req.url === "/frame") {
+      if (!point) {
         // A reloaded viewer cancels capture; disconnect so a stuck capture cannot block its successor.
         const cancel = () => {
           if (!res.writableEnded) {
@@ -152,20 +174,7 @@ export async function startHumanCheckServer(
         }
         return;
       }
-      let raw = "";
-      for await (const chunk of req) {
-        raw += chunk;
-        if (Buffer.byteLength(raw) > 1024) {
-          res.writeHead(413).end();
-          return;
-        }
-      }
-      const { x, y } = JSON.parse(raw) as { x: number; y: number };
-      if (![x, y].every((v) => typeof v === "number" && Number.isFinite(v) && v >= 0)) {
-        res.writeHead(400).end();
-        return;
-      }
-      await c.Page.bringToFront();
+      const { x, y } = point;
       await c.Input.dispatchMouseEvent({
         type: "mousePressed",
         x,
