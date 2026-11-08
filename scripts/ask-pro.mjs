@@ -82,8 +82,8 @@ async function ensureRuntime() {
     });
     const packageJson = JSON.parse(fs.readFileSync(path.join(staging, "package.json"), "utf8"));
     const contentHash = hashSource(staging);
-    const version = safeKeyPart(packageJson.version || "0.0.0");
-    const target = path.join(parent, `${version}-${contentHash.slice(0, 16)}`);
+    // The install folder has no git metadata, so the content hash names the build.
+    const target = path.join(parent, contentHash.slice(0, 8));
     const ready = path.join(target, READY_MARKER);
     if (fs.existsSync(ready) && claim(target)) {
       fs.rmSync(staging, { recursive: true, force: true });
@@ -119,7 +119,10 @@ async function ensureRuntime() {
     try {
       await bootstrap(target, packageJson);
       fs.writeFileSync(leasePath(target, process.pid), JSON.stringify({ pid: process.pid }));
-      fs.writeFileSync(ready, `${JSON.stringify({ version, contentHash }, null, 2)}\n`);
+      fs.writeFileSync(
+        ready,
+        `${JSON.stringify({ version: packageJson.version, contentHash }, null, 2)}\n`,
+      );
       fs.rmSync(marker, { force: true });
     } catch (error) {
       fs.rmSync(target, { recursive: true, force: true });
@@ -423,14 +426,6 @@ function sourceFiles(root, base = root) {
 function excluded(relative) {
   const first = relative.split(path.sep)[0];
   return ["node_modules", ".git", ".ask-pro", "browser-profile", "agents"].includes(first);
-}
-
-function safeKeyPart(value) {
-  return (
-    String(value)
-      .replace(/[^a-zA-Z0-9._-]/g, "-")
-      .replace(/^[._-]+|[._-]+$/g, "") || "0.0.0"
-  );
 }
 
 function quoteCommandPart(value) {
