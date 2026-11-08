@@ -1028,6 +1028,42 @@ describe("ask-pro browser runner", () => {
     });
   });
 
+  test.each([false, true])(
+    "challenge recovery sends an unsent prompt but preserves an already submitted response: %s",
+    async (promptSubmitted) => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-challenge-resume-"));
+      tempDirs.push(cwd);
+      const session = await createAskProSession({
+        cwd,
+        question: "Recover this question.",
+        filePatterns: [],
+        dryRun: false,
+      });
+      await writeAskProBrowserMetadata({
+        cwd,
+        sessionId: session.id,
+        metadata: {
+          schemaVersion: 1,
+          status: "needs_user_auth",
+          profileDir: testSharedProfileDir(),
+          runtime: { chromePort: 9222, chromeTargetId: "challenge-tab", promptSubmitted },
+        },
+      });
+      await updateAskProStatus({
+        cwd,
+        sessionId: session.id,
+        status: "NEEDS_USER_AUTH",
+        reason: "challenge_detected",
+      });
+      await resumeAskProBrowserSession({ cwd, sessionId: session.id });
+      expect((await readAskProAnswer({ cwd, sessionId: session.id })).answer).toBe(
+        promptSubmitted ? "# Reattached\n" : "# Agent\n",
+      );
+      expect(runBrowserModeMock).toHaveBeenCalledTimes(promptSubmitted ? 0 : 1);
+      expect(resumeBrowserSessionMock).toHaveBeenCalledTimes(promptSubmitted ? 1 : 0);
+    },
+  );
+
   test("auth relaunch defaults missing stored URLs to temporary chat", async () => {
     const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-default-temp-"));
     tempDirs.push(cwd);

@@ -453,6 +453,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
   }
   const runtimeHintCb = options.runtimeHintCb;
   let githubCheckPending = config.github;
+  let promptSubmitted = false;
   let lastTargetId: string | undefined;
   let lastUrl: string | undefined;
   const emitRuntimeHint = async (required = false): Promise<void> => {
@@ -470,6 +471,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       userDataDir,
       controllerPid: process.pid,
       githubCheckPending,
+      promptSubmitted,
     };
     try {
       await runtimeHintCb(hint);
@@ -1184,7 +1186,11 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           inputTimeoutMs: config.inputTimeoutMs ?? undefined,
           baselineTurns: baselineTurns ?? undefined,
           attachmentNames,
-          afterSubmit: postSubmitInputGuard ? () => postSubmitInputGuard.enable() : undefined,
+          afterSubmit: async () => {
+            promptSubmitted = true;
+            await emitRuntimeHint();
+            await postSubmitInputGuard?.enable();
+          },
         };
         await raceWithDisconnect(
           runProviderSubmissionFlow(chatgptDomProvider, {
@@ -2291,6 +2297,7 @@ async function runRemoteBrowserMode(
   let expectedConversationId: string | undefined;
   let attachedExistingTab = false;
   let githubCheckPending = config.github;
+  let promptSubmitted = false;
   let githubSetupRequired = false;
   let ownsTarget = true;
   const runtimeHintCb = options.runtimeHintCb;
@@ -2308,6 +2315,7 @@ async function runRemoteBrowserMode(
         conversationId,
         controllerPid: process.pid,
         githubCheckPending,
+        promptSubmitted,
       });
     } catch (error) {
       if (required) throw error;
@@ -2573,7 +2581,11 @@ async function runRemoteBrowserMode(
           inputTimeoutMs: config.inputTimeoutMs ?? undefined,
           baselineTurns: baselineTurns ?? undefined,
           attachmentNames,
-          afterSubmit: postSubmitInputGuard ? () => postSubmitInputGuard.enable() : undefined,
+          afterSubmit: async () => {
+            promptSubmitted = true;
+            await emitRuntimeHint();
+            await postSubmitInputGuard?.enable();
+          },
         };
         await runProviderSubmissionFlow(chatgptDomProvider, {
           prompt,

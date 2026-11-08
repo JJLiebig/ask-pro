@@ -28,7 +28,8 @@ Both installs run the same bundled launcher. The `ask-pro` npm package
 
 You need Node.js 24+, npm, Chrome, and a ChatGPT account with Pro access. The
 browser runtime supports Windows and Linux. Linux without `DISPLAY` or
-`WAYLAND_DISPLAY` uses headless Chrome. See [Linux setup and remote sign-in](docs/linux.md).
+`WAYLAND_DISPLAY` runs Chrome on a private Xvfb display. See
+[Linux and session import](docs/linux.md).
 
 **Upgrading from an earlier version:** nothing to do. On its first run,
 ask-pro moves your signed-in browser profiles from `~/.codex/state/ask-pro` to
@@ -37,9 +38,13 @@ uses it where it is and moves it on a later run.
 
 ## Browser and session state
 
-ask-pro never asks for, types, reads, or logs passwords, MFA codes, recovery
-codes, session cookies, or raw auth tokens. A new browser profile may need one
-manual ChatGPT login. On Windows, ordinary managed Chrome runs start minimized
+Agents never ask for, type, read, or log passwords, MFA codes, recovery codes,
+session cookies, or raw auth tokens. A new browser profile needs a human login.
+On headless machines, the human imports session cookies directly through stdin
+with `--import-session`; see [Linux setup](docs/linux.md). On a desktop, use
+`--login` for manual ChatGPT sign-in. Headless Cloudflare challenges return a
+`needs_human_check` link for the human to click, then the agent resumes.
+On Windows, ordinary managed Chrome runs start minimized
 and are hidden; login and recovery restore the window for human action.
 
 ask-pro keeps its state in `~/.agents/state/ask-pro/`: the persistent browser

@@ -12,15 +12,23 @@ The calling agent still owns the work. Use Pro for judgment, architecture, risk 
 ## Running ask-pro
 
 On a display-less Linux host, install Xvfb (`sudo apt install xvfb`); ask-pro
-manages a private display for headed Chrome during login and queries. Set
-`CHROME_PATH` if Chrome is not discovered, and
-`ASK_PRO_LOGIN_HOST` to the host's private Tailscale IP. Before the first query,
-run `ask-pro --login` and give the human its `login_url`. Keep that command alive
-while they sign in from their desktop or phone. The link expires after 15 minutes
-or Done. Never drive the login page or capture its frames during real sign-in.
-After the human confirms the ChatGPT composer is visible, resume the saved
-session or start the requested query. A later `needs_auth` result includes a
-`login` command for the same profile. See [Linux setup](docs/linux.md).
+manages a private display for headed Chrome queries. Set `CHROME_PATH` if Chrome
+is not discovered. Before the first query, the human logs in on a personal
+browser and imports only the session cookies directly through stdin with
+`--import-session`. Give them [Linux setup](docs/linux.md); never ask them to
+send cookies to the agent or paste them in chat. A later `needs_auth` result
+includes an `import` command for the saved profile. Import checks login without
+sending a query; after `ready`, resume the saved session or start the requested query.
+Session import transfers login only. When a headless run returns
+`needs_human_check`, ask the user: "ask-pro needs a Cloudflare check clicked:
+<check_url>". The human opens the link and clicks the checkbox in the live page.
+The page reports when the check clears, without a Done button. Then run the
+emitted `resume` command. Never open or click that real challenge yourself,
+capture its frames, or automate its controls. The link expires after 15 minutes;
+resume for a fresh link if needed. `ASK_PRO_CHECK_HOST` overrides the link's
+hostname (for example, the server's Tailscale IP); the viewer binds `0.0.0.0`.
+Use a trusted private network such as Tailscale for this HTTP link.
+On a desktop, `--login` opens Chrome for human sign-in.
 
 This skill folder contains ask-pro itself; nothing else needs installing. In
 the commands below, `ask-pro` stands for:
@@ -231,7 +239,7 @@ ask-pro --harvest <session-id>
 
 ## Safety
 
-Never ask for, read, store, type, or log passwords, MFA codes, recovery codes, session cookies, or raw auth tokens.
+Never ask for, read, store, type, or log passwords, MFA codes, recovery codes, session cookies, or raw auth tokens. The human alone may supply session cookies directly to `--import-session` stdin; do not inspect that input or the resulting profile.
 
 Browser auth is human-controlled. Continue only after the human says the ChatGPT composer is visible.
 
