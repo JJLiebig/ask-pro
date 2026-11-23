@@ -506,7 +506,7 @@ async function resumeAskProBrowserSessionWithLease({
           await fs.rm(path.join(paths.dir, "QUESTIONS.json"), { force: true });
         },
         promptPreview: prompt,
-        chromeModeCb: async (chromeMode) => {
+        chromeModeCb: async (chromeMode, runtime) => {
           const current = await readBrowserMetadata(paths.browser).catch(() => metadata);
           await writeAskProBrowserMetadata({
             cwd,
@@ -520,6 +520,7 @@ async function resumeAskProBrowserSessionWithLease({
               url: chatgptUrl,
               acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
               chromeMode,
+              runtime: runtime ?? current.runtime,
               reason: undefined,
             },
           });

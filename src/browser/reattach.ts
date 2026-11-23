@@ -1,4 +1,4 @@
-import { AssistantStoppedError } from "./errors.js";
+import { AssistantStoppedError, BrowserAutomationError } from "./errors.js";
 import {
   AssistantQuestionsError,
   answerAssistantQuestions,
@@ -81,7 +81,10 @@ export interface ReattachDeps {
   continuationState?: { used: boolean };
   listTargets?: () => Promise<TargetInfoLite[]>;
   connect?: (options?: unknown) => Promise<ChromeClient>;
-  chromeModeCb?: (mode: ReattachResult["chromeMode"]) => Promise<void> | void;
+  chromeModeCb?: (
+    mode: ReattachResult["chromeMode"],
+    runtime?: BrowserRuntimeMetadata,
+  ) => Promise<void> | void;
   waitForAssistantResponse?: typeof waitForAssistantResponse;
   captureAssistantMarkdown?: typeof captureAssistantMarkdown;
   recoverSession?: (
@@ -749,6 +752,25 @@ async function resumeBrowserSessionViaNewChrome(
       chromeMode: "relaunched",
       keepBrowserOpen: afterAnswerResult?.keepBrowserOpen,
     };
+  } catch (error) {
+    if (
+      isolatedTargetId &&
+      error instanceof BrowserAutomationError &&
+      error.details?.stage === "cloudflare-challenge"
+    ) {
+      await deps.chromeModeCb?.("relaunched", {
+        ...runtime,
+        chromePid: chrome.pid,
+        chromePort: chrome.port,
+        chromeHost,
+        chromeBrowserWSEndpoint: undefined,
+        chromeProfileRoot: undefined,
+        chromeTargetId: isolatedTargetId,
+        userDataDir,
+        controllerPid: process.pid,
+      });
+    }
+    throw error;
   } finally {
     await client?.close().catch(() => undefined);
     if (manualLogin && completed && !keepBrowserOpen && isolatedTargetId) {
