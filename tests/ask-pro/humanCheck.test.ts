@@ -20,22 +20,29 @@ function fakeChallenge() {
   const origin = "http://fixture.invalid";
   let inlineChallenge = false;
   let visible = true;
+  let followUpVisible = false;
   let source = "http://fixture.invalid/captcha-one";
   const iframe = {
     getBoundingClientRect: () => ({ width: visible ? 100 : 0, height: 100 }),
     getAttribute: () => source,
+    matches: () => true,
+  };
+  const followUp = {
+    getBoundingClientRect: () => ({ width: followUpVisible ? 100 : 0, height: 100 }),
+    getAttribute: () => "http://fixture.invalid/captcha-follow-up",
   };
   const document = {
     title: "Just a moment...",
     readyState: "complete",
     querySelectorAll: (selector: string) =>
-      inlineChallenge && selector.startsWith("iframe") ? [iframe] : [],
+      inlineChallenge && selector.startsWith("iframe") ? [iframe, followUp] : [],
     addEventListener: () => {},
   };
   const location = { origin, href: origin };
   const globals = { document, location, getComputedStyle: () => ({}) };
   let onMutation: () => void;
   let onResize: () => void;
+  let onLoad: (event: { type: string; target: typeof iframe }) => void;
   const resizing = new Set<unknown>();
   let installObserver: () => void;
   let bindingName: string;
@@ -64,7 +71,9 @@ function fakeChallenge() {
       addScriptToEvaluateOnNewDocument: async ({ source }: { source: string }) => {
         installObserver = () => {
           const window = {
-            addEventListener: () => {},
+            addEventListener: (event: string, callback: typeof onLoad) => {
+              if (event === "load") onLoad = callback;
+            },
             get top() {
               return this;
             },
@@ -138,12 +147,19 @@ function fakeChallenge() {
       source = "http://fixture.invalid/captcha-two";
       onMutation();
     },
+    reloadInlineChallenge: () => onLoad({ type: "load", target: iframe }),
+    switchVisibleChallenge: () => {
+      visible = false;
+      followUpVisible = true;
+      if (resizing.has(iframe)) onResize();
+    },
     hideIframeWithoutMutation: () => {
       visible = false;
     },
     resizeIframe: () => {
       visible = false;
-      if (resizing.has(iframe)) onResize();
+      followUpVisible = false;
+      if (resizing.has(followUp)) onResize();
     },
     disconnect: () => events.emit("disconnect"),
   };
@@ -277,9 +293,16 @@ test("settles an inline challenge that disappears after the phone sends its last
   fixture.showInlineChallenge();
   const wait = openWait(url);
   await wait.attached;
-  const initial = await request(url, "/frame");
-  fixture.replaceInlineChallenge();
-  expect((await click(url, initial.revision)).status).toBe(202);
+  for (const replace of [
+    fixture.replaceInlineChallenge,
+    fixture.reloadInlineChallenge,
+    fixture.switchVisibleChallenge,
+  ]) {
+    const initial = await request(url, "/frame");
+    expect(initial.status).toBe(200);
+    replace();
+    expect((await click(url, initial.revision)).status).toBe(202);
+  }
   expect(fixture.clicks()).toBe(0);
   const replacement = await request(url, "/frame");
   expect((await click(url, replacement.revision)).status).toBe(200);

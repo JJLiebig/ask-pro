@@ -32,6 +32,10 @@ const MONITOR_BINDING = "reportAskProHumanCheck";
 const CHALLENGE_FRAMES =
   'iframe[src*="challenges.cloudflare.com"],iframe[src*="/challenge-platform/" i],iframe[src*="captcha" i]';
 const CHALLENGE_CONTAINERS = 'form,[role="dialog"]';
+const VISIBLE_SURFACE = `el => {
+  const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+  return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+}`;
 const FRAME_REVISION_HEADER = "X-Check-Revision";
 type CheckState = "challenge" | "loading" | "clear";
 type CheckClick = { x: number; y: number; revision: number };
@@ -39,7 +43,7 @@ type CheckClick = { x: number; y: number; revision: number };
 function checkStateExpression(origin: string) {
   return `(() => {
     if (location.origin === ${JSON.stringify(origin)}) {
-      const visible = el => { const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'; };
+      const visible = ${VISIBLE_SURFACE};
       if (document.title.toLowerCase().includes('just a moment')) return 'challenge';
       if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_FRAMES)})).some(visible)) return 'challenge';
       if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_CONTAINERS)})).some(el => visible(el) && !el.querySelector('textarea,[contenteditable="true"]') && /\\b(security check|verify you are human|captcha)\\b/i.test(el.textContent || ''))) return 'challenge';
@@ -196,21 +200,24 @@ export async function startHumanCheckServer(
         if (window !== window.top) return;
         let last;
         let watched = new Map();
+        const visible = ${VISIBLE_SURFACE};
         const size = new ResizeObserver(observe);
         const visibility = new IntersectionObserver(observe, { trackVisibility: true, delay: 100 });
-        function observe() {
+        function observe(event) {
           const surfaces = location.origin === ${JSON.stringify(options.origin ?? CHATGPT_ORIGIN)}
             ? new Map(Array.from(document.querySelectorAll(${JSON.stringify(`${CHALLENGE_FRAMES},${CHALLENGE_CONTAINERS}`)}),
-                el => [el, el.getAttribute('src')]))
+                el => [el, JSON.stringify([el.getAttribute('src'), visible(el)])]))
             : new Map();
-          let changed = surfaces.size !== watched.size;
+          const reloaded = event?.type === 'load' && surfaces.has(event.target) &&
+            event.target.matches(${JSON.stringify(CHALLENGE_FRAMES)});
+          let changed = reloaded || surfaces.size !== watched.size;
           for (const el of watched.keys()) {
             if (surfaces.has(el)) continue;
             size.unobserve(el);
             visibility.unobserve(el);
           }
-          for (const [el, src] of surfaces) {
-            if (!watched.has(el) || watched.get(el) !== src) changed = true;
+          for (const [el, surface] of surfaces) {
+            if (watched.get(el) !== surface) changed = true;
             if (watched.has(el)) continue;
             size.observe(el);
             visibility.observe(el);
