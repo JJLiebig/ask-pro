@@ -19,7 +19,7 @@ afterEach(async () => {
 function fakeChallenge() {
   const origin = "http://fixture.invalid";
   let inlineChallenge = false;
-  let dialogChallenge = false;
+  let dialogChallenge: "dialog" | "nested form" | undefined;
   let visible = true;
   let followUpVisible = false;
   let source = "http://fixture.invalid/captcha-one";
@@ -38,12 +38,14 @@ function fakeChallenge() {
     querySelector: () => null,
     textContent: "Verify you are human",
   };
+  const nestedForm = { ...dialog, textContent: "" };
   const document = {
     title: "Just a moment...",
     readyState: "complete",
     querySelectorAll: (selector: string) => [
       ...(inlineChallenge && selector.includes("iframe") ? [iframe, followUp] : []),
       ...(dialogChallenge && selector.includes("form") ? [dialog] : []),
+      ...(dialogChallenge === "nested form" && selector.includes("form") ? [nestedForm] : []),
     ],
     addEventListener: () => {},
   };
@@ -171,16 +173,19 @@ function fakeChallenge() {
       inlineChallenge = true;
       onMutation();
     },
-    showDialogChallenge: () => {
+    showDialogChallenge: (container: "dialog" | "nested form") => {
       document.title = "Fixture app";
-      dialogChallenge = true;
+      dialogChallenge = container;
       onMutation();
     },
-    replaceDialogControl: () =>
+    replaceControl: () =>
       onMutation([
         {
           type: "childList",
-          target: { closest: () => dialog },
+          target: {
+            closest: () =>
+              dialogChallenge === "nested form" ? nestedForm : dialogChallenge ? dialog : null,
+          },
           addedNodes: [{ matches: (selector: string) => selector.includes("input") }],
           removedNodes: [],
         },
@@ -359,18 +364,22 @@ test("settles an inline challenge that disappears after the phone sends its last
   expect(await wait.response).toEqual({ status: 200, body: "cleared" });
 });
 
-test("rejects an old frame after a challenge dialog replaces its control", async () => {
-  const { fixture, url } = await startFixture();
-  fixture.showDialogChallenge();
-  const first = await request(url, "/frame");
-  expect(first.status).toBe(200);
-  fixture.replaceDialogControl();
-  expect((await click(url, first.revision)).status).toBe(202);
-  expect(fixture.clicks()).toBe(0);
-  const current = await request(url, "/frame");
-  expect((await click(url, current.revision)).status).toBe(200);
-  expect(fixture.clicks()).toBe(1);
-});
+test.each(["dialog", "nested form", "title-only"] as const)(
+  "rejects an old frame after a %s challenge replaces its control",
+  async (surface) => {
+    const { fixture, url } = await startFixture();
+    if (surface !== "title-only") fixture.showDialogChallenge(surface);
+    const first = await request(url, "/frame");
+    expect(first.status).toBe(200);
+    fixture.replaceControl();
+    expect((await click(url, first.revision)).status).toBe(202);
+    expect(fixture.clicks()).toBe(0);
+    const current = await request(url, "/frame");
+    expect(current.status).toBe(200);
+    await click(url, current.revision);
+    expect(fixture.clicks()).toBe(1);
+  },
+);
 
 test.each(["expired", "tab closed", "session moved on"])(
   "ends a pending wait when %s",

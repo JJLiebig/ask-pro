@@ -233,7 +233,6 @@ export async function startHumanCheckServer(
         let last;
         let watched = new Map();
         const visible = ${VISIBLE_SURFACE};
-        const hasPrompt = ${CHALLENGE_PROMPT};
         const controls = ${JSON.stringify(CHALLENGE_CONTROLS)};
         const size = new ResizeObserver(observe);
         const visibility = new IntersectionObserver(observe, { trackVisibility: true, delay: 100 });
@@ -246,8 +245,6 @@ export async function startHumanCheckServer(
             event.target.matches(${JSON.stringify(CHALLENGE_FRAMES)});
           const replacedControl = Array.isArray(event) && event.some(record => {
             if (record.type !== 'childList') return false;
-            const container = record.target.closest?.(${JSON.stringify(CHALLENGE_CONTAINERS)});
-            if (!surfaces.has(container) || !visible(container) || !hasPrompt(container)) return false;
             return [...record.addedNodes, ...record.removedNodes].some(node =>
               node.matches?.(controls) || node.querySelector?.(controls));
           });
