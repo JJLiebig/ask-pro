@@ -42,8 +42,9 @@ Agents never ask for, type, read, or log passwords, MFA codes, recovery codes,
 session cookies, or raw auth tokens. A new browser profile needs a human login.
 On headless machines, the human imports session cookies directly through stdin
 with `--import-session`; see [Linux setup](docs/linux.md). On a desktop, use
-`--login` for manual ChatGPT sign-in. Headless Cloudflare challenges return a
-`needs_human_check` link for the human to click, then the agent resumes.
+`--login` for manual ChatGPT sign-in. When ChatGPT asks for a human check on a
+headless host, your agent sends you a private check link and starts resuming in
+the background so the run continues on its own once you clear verification.
 On Windows, ordinary managed Chrome runs start minimized
 and are hidden; login and recovery restore the window for human action.
 

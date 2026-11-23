@@ -21,11 +21,15 @@ includes an `import` command for the saved profile. Import checks login without
 sending a query; after `ready`, resume the saved session or start the requested query.
 Session import transfers login only. When a headless run returns
 `needs_human_check`, ask the user: "ask-pro needs a Cloudflare check clicked:
-<check_url>". The human opens the link and clicks the checkbox in the live page.
-The page reports when the check clears, without a Done button. Then run the
-emitted `resume` command. Never open or click that real challenge yourself,
-capture its frames, or automate its controls. The link expires after 15 minutes;
-resume for a fresh link if needed. `ASK_PRO_CHECK_HOST` overrides the link's
+<check_url>". Immediately run the emitted `resume` command in an `hc` terminal
+or your harness's background mode with no short timeout. Wait for that command's
+completion notification. The human opens the link and clicks the verification
+control, including any follow-up or refresh control shown. They do not need to
+tell you when it clears. If `resume` returns `needs_human_check` again, send the
+new link and start the emitted command again. Never open the real challenge,
+capture its frames, or automate its controls. The viewer closes after clearance,
+when the session moves on or the tab closes, or after 24 hours.
+`ASK_PRO_CHECK_HOST` overrides the link's
 hostname (for example, the server's Tailscale IP); the viewer binds `0.0.0.0`.
 Use a trusted private network such as Tailscale for this HTTP link.
 On a desktop, `--login` opens Chrome for human sign-in.
@@ -78,7 +82,8 @@ When invoked:
    For multiline prompts, write a temporary prompt file and use
    `ask-pro --no-temporary --prompt-file <path> --files "<glob>"`; do not rely
    on shell multiline quoting.
-6. If auth is required, stop and ask the human to log in in the opened browser.
+6. For `needs_human_check`, follow the link and background resume handoff above.
+   For `needs_auth`, ask the human to import the session or sign in on a desktop.
 7. Read the CLI's compact `ask_pro` record and run the emitted `resume` or
    `harvest` command when that is the next action.
 8. Treat the answer as advisory; turn it into your own plan before editing code.

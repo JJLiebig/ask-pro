@@ -1,4 +1,4 @@
-import { AssistantStoppedError } from "./errors.js";
+import { AssistantStoppedError, BrowserAutomationError } from "./errors.js";
 import {
   AssistantQuestionsError,
   answerAssistantQuestions,
@@ -82,6 +82,7 @@ export interface ReattachDeps {
   listTargets?: () => Promise<TargetInfoLite[]>;
   connect?: (options?: unknown) => Promise<ChromeClient>;
   chromeModeCb?: (mode: ReattachResult["chromeMode"]) => Promise<void> | void;
+  humanCheckRuntimeCb?: BrowserRunOptions["runtimeHintCb"];
   waitForAssistantResponse?: typeof waitForAssistantResponse;
   captureAssistantMarkdown?: typeof captureAssistantMarkdown;
   recoverSession?: (
@@ -232,6 +233,7 @@ export async function resumeBrowserSession(
     : null;
   let closeConnection: (() => Promise<void>) | null = null;
   let answeringQuestions = false;
+  let ownsConnectedTarget = false;
 
   try {
     const liveRuntime = await refreshAttachRuntime(runtime, logger).catch(() => runtime);
@@ -255,6 +257,10 @@ export async function resumeBrowserSession(
         })) as TargetInfoLite[]);
     const targetList = (await listTargets()) as TargetInfoLite[];
     const target = pickTarget(targetList, liveRuntime);
+    // The viewer must only be handed a tab owned by this session.
+    if (deps.humanCheckRuntimeCb && target?.targetId !== liveRuntime.chromeTargetId) {
+      throw Error("Saved challenge tab is unavailable.");
+    }
     const connection =
       browserWSEndpoint && !deps.connect
         ? await connectToRemoteChromeTarget(host, port ?? 9222, logger, {
@@ -281,7 +287,7 @@ export async function resumeBrowserSession(
     closeConnection =
       browserWSEndpoint && !deps.connect ? connection.close : () => connection.client.close();
     const connectedTargetId = "targetId" in connection ? connection.targetId : target?.targetId;
-    const ownsConnectedTarget = Boolean(
+    ownsConnectedTarget = Boolean(
       !resolvedConfig.browserTabRef &&
       liveRuntime.chromeTargetId &&
       connectedTargetId === liveRuntime.chromeTargetId,
@@ -352,6 +358,10 @@ export async function resumeBrowserSession(
       pingTimeoutMs,
       "Reattach target did not respond",
     );
+    if (deps.humanCheckRuntimeCb && ownsConnectedTarget) {
+      await deps.humanCheckRuntimeCb({ ...liveRuntime, chromePort: port, chromeHost: host });
+      await ensureNotBlocked(Runtime, resolvedConfig.headless, logger);
+    }
     await ensureConversationOpen();
     let minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     if (deps.questionAnswers) {
@@ -448,6 +458,10 @@ export async function resumeBrowserSession(
     if (
       error instanceof AssistantStoppedError ||
       error instanceof AssistantQuestionsError ||
+      (deps.humanCheckRuntimeCb &&
+        ownsConnectedTarget &&
+        error instanceof BrowserAutomationError &&
+        error.details?.stage === "cloudflare-challenge") ||
       answeringQuestions ||
       deps.questionAnswers?.submissionState.started
     )
@@ -633,6 +647,17 @@ async function resumeBrowserSessionViaNewChrome(
       await windowTransitionLock?.release();
     }
     if (!client) throw new Error("Failed to connect to managed Chrome.");
+    await deps.humanCheckRuntimeCb?.({
+      ...runtime,
+      chromePort: chrome.port,
+      chromeHost,
+      chromePid: chrome.pid,
+      chromeTargetId: isolatedTargetId,
+      chromeBrowserWSEndpoint: undefined,
+      chromeProfileRoot: userDataDir,
+      userDataDir,
+      controllerPid: process.pid,
+    });
     const { Network, Page, Runtime, DOM } = client;
 
     if (Runtime?.enable) {

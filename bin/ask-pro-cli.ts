@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import "dotenv/config";
-import { launchHumanCheck } from "../src/ask-pro/humanCheck.js";
+import { readHumanCheckUrl } from "../src/ask-pro/humanCheck.js";
 import { isHeadlessLinux } from "../src/browser/config.js";
 import { parseSessionCookies, runSessionLogin } from "../src/ask-pro/sessionLogin.js";
 import { AssistantStoppedError } from "../src/browser/errors.js";
@@ -362,7 +362,6 @@ async function submitOrResumeBrowserSession(
     status.status === "NEEDS_GITHUB_CONNECTION"
   ) {
     try {
-      await closeHumanCheckViewer(cwd, sessionId);
       await resumeAskProBrowserSession({
         cwd,
         sessionId,
@@ -481,23 +480,12 @@ async function printAuthInstructions(
   error: AskProNeedsAuthError,
 ): Promise<void> {
   const resumeCommand = buildResumeCommand(sessionId, options, cwd);
-  if (isHeadlessLinux() && error.reason === "challenge_detected") {
-    const paths = getAskProSessionPaths(cwd, sessionId);
-    const metadata = JSON.parse(await fs.readFile(paths.browser, "utf8"));
-    const { chromePort, chromeTargetId } = metadata.runtime ?? {};
-    if (!chromePort || !chromeTargetId)
-      throw new Error("Challenge browser is unavailable. Resume ask-pro to reopen it.");
-    const checkUrl = await launchHumanCheck({
-      chromePort,
-      targetId: chromeTargetId,
-      profile: error.browserProfile,
-    });
-    await fs.writeFile(path.join(paths.dir, "human-check.json"), JSON.stringify({ url: checkUrl }));
+  if (error.checkUrl) {
     writeToon("ask_pro", {
       session: sessionId,
       state: "needs_human_check",
-      check_url: checkUrl,
-      action: "human_check_then_resume",
+      check_url: error.checkUrl,
+      action: "send_check_link_and_resume",
       resume: resumeCommand,
     });
     return;
@@ -697,15 +685,12 @@ async function readBrowserPreflightForSession(
     metadata.reason === "challenge_detected" &&
     isHeadlessLinux()
   ) {
-    const check = await fs
-      .readFile(path.join(getAskProSessionPaths(cwd, sessionId).dir, "human-check.json"), "utf8")
-      .then(JSON.parse)
-      .catch(() => null);
-    if (check?.url)
+    const check = await readHumanCheckUrl(getAskProSessionPaths(cwd, sessionId).dir);
+    if (check)
       Object.assign(questions, {
         state: "needs_human_check",
-        check_url: check.url,
-        action: "human_check_then_resume",
+        check_url: check.href,
+        action: "send_check_link_and_resume",
       });
   }
   if (metadata.status === "awaiting_answers") {
@@ -829,20 +814,4 @@ function classifyCliError(message: string): string {
     return "browser_failed";
   }
   return "failed";
-}
-
-async function closeHumanCheckViewer(cwd: string, sessionId: string): Promise<void> {
-  const file = path.join(getAskProSessionPaths(cwd, sessionId).dir, "human-check.json");
-  const check = await fs
-    .readFile(file, "utf8")
-    .then(JSON.parse)
-    .catch(() => null);
-  if (!check?.url) return;
-  const url = new URL(check.url);
-  await fetch(`http://127.0.0.1:${url.port}/close`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${url.hash.slice(1)}` },
-    signal: AbortSignal.timeout(2000),
-  }).catch(() => undefined);
-  await fs.rm(file, { force: true });
 }

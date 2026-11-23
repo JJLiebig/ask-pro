@@ -3,6 +3,7 @@ import { AssistantQuestionsError } from "../../src/browser/actions/questions.js"
 import { readAskProQuestions, parseQuestionAnswers } from "../../src/ask-pro/questions.js";
 import { BrowserAutomationError } from "../../src/browser/errors.js";
 import { GitHubConnectionRequiredError } from "../../src/browser/actions/github.js";
+import type { ReattachDeps } from "../../src/browser/reattach.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -16,6 +17,11 @@ import {
 } from "../../src/ask-pro/session.js";
 
 const managedProfileState = vi.hoisted(() => ({ root: "" }));
+const isHeadlessLinuxMock = vi.fn(() => false);
+const resumeHumanCheckMock = vi.fn<
+  typeof import("../../src/ask-pro/humanCheck.js").resumeHumanCheck
+>(async () => "unavailable");
+const saveHumanCheckMock = vi.fn<typeof import("../../src/ask-pro/humanCheck.js").saveHumanCheck>();
 const resumeBrowserSessionMock = vi.fn(async () => ({
   answerText: "reattached answer",
   answerMarkdown: "# Reattached\n",
@@ -41,6 +47,14 @@ const harvestLatestAssistantZipMock = vi.fn(async () => ({
 
 vi.mock("../../src/browser/reattach.js", () => ({
   resumeBrowserSession: resumeBrowserSessionMock,
+}));
+vi.mock("../../src/ask-pro/humanCheck.js", () => ({
+  resumeHumanCheck: resumeHumanCheckMock,
+  saveHumanCheck: saveHumanCheckMock,
+}));
+vi.mock("../../src/browser/config.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/browser/config.js")>()),
+  isHeadlessLinux: isHeadlessLinuxMock,
 }));
 vi.mock("../../src/browserMode.js", () => ({
   runBrowserMode: runBrowserModeMock,
@@ -1029,7 +1043,7 @@ describe("ask-pro browser runner", () => {
   });
 
   test.each([false, true])(
-    "challenge recovery sends an unsent prompt but preserves an already submitted response: %s",
+    "waits for human clearance and resumes the same tab with promptSubmitted=%s",
     async (promptSubmitted) => {
       const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-challenge-resume-"));
       tempDirs.push(cwd);
@@ -1055,12 +1069,100 @@ describe("ask-pro browser runner", () => {
         status: "NEEDS_USER_AUTH",
         reason: "challenge_detected",
       });
-      await resumeAskProBrowserSession({ cwd, sessionId: session.id });
+      isHeadlessLinuxMock.mockReturnValueOnce(true);
+      const waiting = deferred();
+      const cleared = deferred();
+      resumeHumanCheckMock.mockImplementationOnce(async () => {
+        waiting.resolve();
+        await cleared.promise;
+        return "clear";
+      });
+      const resume = resumeAskProBrowserSession({ cwd, sessionId: session.id });
+      await waiting.promise;
+      expect(runBrowserModeMock).not.toHaveBeenCalled();
+      expect(resumeBrowserSessionMock).not.toHaveBeenCalled();
+      cleared.resolve();
+      await resume;
       expect((await readAskProAnswer({ cwd, sessionId: session.id })).answer).toBe(
         promptSubmitted ? "# Reattached\n" : "# Agent\n",
       );
-      expect(runBrowserModeMock).toHaveBeenCalledTimes(promptSubmitted ? 0 : 1);
-      expect(resumeBrowserSessionMock).toHaveBeenCalledTimes(promptSubmitted ? 1 : 0);
+      expect(closeTabMock).not.toHaveBeenCalled();
+      if (promptSubmitted) {
+        expect(resumeBrowserSessionMock.mock.calls[0]).toEqual([
+          expect.objectContaining({ chromeTargetId: "challenge-tab", promptSubmitted: true }),
+          expect.anything(),
+          expect.anything(),
+          expect.anything(),
+        ]);
+      } else {
+        expect(runBrowserModeMock.mock.calls[0]).toEqual([
+          expect.objectContaining({
+            resumeTarget: { chromePort: 9222, targetId: "challenge-tab" },
+          }),
+        ]);
+      }
+    },
+  );
+
+  test.each(["link expired", "Chrome restarted"])(
+    "hands back a fresh viewer after %s",
+    async (failure) => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-expired-check-"));
+      tempDirs.push(cwd);
+      const session = await createAskProSession({
+        cwd,
+        question: "Recover this question.",
+        filePatterns: [],
+        dryRun: false,
+      });
+      await writeAskProBrowserMetadata({
+        cwd,
+        sessionId: session.id,
+        metadata: {
+          status: "needs_user_auth",
+          profileDir: testSharedProfileDir(),
+          runtime: { chromePort: 9222, chromeTargetId: "challenge-tab", promptSubmitted: true },
+        },
+      });
+      await updateAskProStatus({
+        cwd,
+        sessionId: session.id,
+        status: "NEEDS_USER_AUTH",
+        reason: "challenge_detected",
+      });
+      isHeadlessLinuxMock.mockReturnValueOnce(true).mockReturnValueOnce(true);
+      const restarted = failure === "Chrome restarted";
+      resumeHumanCheckMock.mockResolvedValueOnce(restarted ? "unavailable" : "challenge");
+      if (restarted) {
+        resumeBrowserSessionMock.mockImplementationOnce(async (...args: unknown[]) => {
+          const deps = args[3] as ReattachDeps;
+          await deps.humanCheckRuntimeCb!({
+            chromePort: 9223,
+            chromeTargetId: "recovered-tab",
+            promptSubmitted: true,
+          });
+          throw new BrowserAutomationError("Cloudflare challenge detected.", {
+            stage: "cloudflare-challenge",
+          });
+        });
+      }
+      saveHumanCheckMock.mockImplementationOnce(
+        async (_dir, options) => `http://fixture.invalid:${options.chromePort}/${options.targetId}`,
+      );
+      await expect(
+        resumeAskProBrowserSession({ cwd, sessionId: session.id }),
+      ).rejects.toMatchObject({
+        reason: "challenge_detected",
+        checkUrl: restarted
+          ? "http://fixture.invalid:9223/recovered-tab"
+          : "http://fixture.invalid:9222/challenge-tab",
+      });
+      expect((await readAskProStatus({ cwd, sessionId: session.id })).status.status).toBe(
+        "NEEDS_USER_AUTH",
+      );
+      expect(closeTabMock).not.toHaveBeenCalled();
+      expect(runBrowserModeMock).not.toHaveBeenCalled();
+      expect(resumeBrowserSessionMock).toHaveBeenCalledTimes(restarted ? 1 : 0);
     },
   );
 

@@ -29,6 +29,10 @@
 
 ### Fixed
 
+- Headless runs continue automatically once Cloudflare verification clears. The
+  viewer relays follow-up checks for up to 24 hours. If it disappears while a
+  challenge remains pending, resuming returns a fresh link.
+
 - Use headed Chrome on a managed private Xvfb display on display-less Linux hosts,
   avoiding the headless-only Cloudflare block.
 
