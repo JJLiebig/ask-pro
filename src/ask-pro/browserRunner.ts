@@ -506,7 +506,7 @@ async function resumeAskProBrowserSessionWithLease({
           await fs.rm(path.join(paths.dir, "QUESTIONS.json"), { force: true });
         },
         promptPreview: prompt,
-        chromeModeCb: async (chromeMode) => {
+        chromeModeCb: async (chromeMode, runtime) => {
           const current = await readBrowserMetadata(paths.browser).catch(() => metadata);
           await writeAskProBrowserMetadata({
             cwd,
@@ -520,6 +520,7 @@ async function resumeAskProBrowserSessionWithLease({
               url: chatgptUrl,
               acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
               chromeMode,
+              runtime: runtime ?? current.runtime,
               reason: undefined,
             },
           });
@@ -577,7 +578,10 @@ async function resumeAskProBrowserSessionWithLease({
     if (capturedFinalStatus) {
       throw error;
     }
+    const answersPending = questionAnswers && !questionAnswers.submissionState.started;
     if (isAuthGateError(error)) {
+      const reason = classifyBrowserError(error);
+      const retryAnswers = answersPending && reason === "challenge_detected";
       const currentMetadata = await readBrowserMetadata(paths.browser).catch(() => metadata);
       await writeAskProBrowserMetadata({
         cwd,
@@ -585,22 +589,22 @@ async function resumeAskProBrowserSessionWithLease({
         metadata: {
           ...currentMetadata,
           schemaVersion: 1,
-          status: "needs_user_auth",
+          status: retryAnswers ? "awaiting_answers" : "needs_user_auth",
           profileDir: fallbackProfile,
           temporary: effectiveTemporary,
           url: chatgptUrl,
           acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
           chromeMode: authFailureChromeMode(currentMetadata.chromeMode),
-          reason: classifyBrowserError(error),
+          reason,
         },
       });
       await updateAskProStatus({
         cwd,
         sessionId,
-        status: "NEEDS_USER_AUTH",
-        reason: classifyBrowserError(error),
+        status: retryAnswers ? "AWAITING_ANSWERS" : "NEEDS_USER_AUTH",
+        reason,
       });
-      throw new AskProNeedsAuthError(sessionId, fallbackProfile, classifyBrowserError(error));
+      throw new AskProNeedsAuthError(sessionId, fallbackProfile, reason);
     }
     if (error instanceof AssistantQuestionsError) {
       await writeAskProQuestions(paths.dir, error.questions);
@@ -634,7 +638,6 @@ async function resumeAskProBrowserSessionWithLease({
       throw error;
     }
     const reason = error instanceof Error ? error.message : String(error);
-    const answersPending = questionAnswers && !questionAnswers.submissionState.started;
     await writeTerminalBrowserMetadata(
       cwd,
       sessionId,

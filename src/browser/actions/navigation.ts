@@ -152,7 +152,11 @@ export async function navigateToPromptReadyWithFallback(
     await ensureReady(Runtime, timeoutMs, logger);
     return { usedFallback: false };
   } catch (error) {
-    if (!fallbackUrl || fallbackUrl === url) {
+    if (
+      !fallbackUrl ||
+      fallbackUrl === url ||
+      (error instanceof BrowserAutomationError && error.details?.stage === "cloudflare-challenge")
+    ) {
       throw error;
     }
     const fallbackTimeout = fallbackTimeoutMs ?? Math.max(timeoutMs * 2, 120_000);
@@ -169,7 +173,7 @@ export async function navigateToPromptReadyWithFallback(
 
 export async function ensureNotBlocked(
   Runtime: ChromeClient["Runtime"],
-  headless: boolean,
+  headless: boolean | undefined,
   logger: BrowserLogger,
 ) {
   if (await isCloudflareInterstitial(Runtime)) {
@@ -413,6 +417,7 @@ export async function ensurePromptReady(
         return;
       }
     }
+    await ensureNotBlocked(Runtime, undefined, logger);
     await logDomFailure(Runtime, logger, "prompt-textarea");
     throw new Error("Prompt textarea did not appear before timeout");
   }

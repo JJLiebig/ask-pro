@@ -509,6 +509,27 @@ describe("ask-pro cli", () => {
           stdout: expect.stringContaining("Cannot change Temporary Chat mode"),
         });
         expect(await snapshotFiles(cwd)).toEqual(beforeModeChange);
+        if (process.platform === "linux") {
+          const browserPath = path.join(sessionDir, "browser.json");
+          const browser = JSON.parse(await fs.readFile(browserPath, "utf8"));
+          const checkUrl = "http://fixture.test/check";
+          await Promise.all([
+            fs.writeFile(browserPath, JSON.stringify({ ...browser, reason: "challenge_detected" })),
+            fs.writeFile(
+              path.join(sessionDir, "human-check.json"),
+              JSON.stringify({ url: checkUrl }),
+            ),
+          ]);
+          const { stdout: checking } = await execFileAsync(
+            process.execPath,
+            ["--import", tsxLoader, cli, "--status", sessions[0]!],
+            { cwd, env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } },
+          );
+          expect(checking).toContain("  state: needs_human_check\n");
+          expect(checking).toContain(`  check_url: "${checkUrl}"\n`);
+          expect(checking).toContain("--answers <answers.json>");
+          expect(checking).not.toContain("\n  resume: ");
+        }
       }
       const updated = JSON.parse(await fs.readFile(statusPath, "utf8"));
       expect(updated.status).toBe(pendingStatus);

@@ -29,6 +29,9 @@
 
 ### Fixed
 
+- Ask-pro now provides a link to complete a Cloudflare check on headless Linux
+  if one appears after sign-in and remains when the prompt box times out.
+
 - Use headed Chrome on a managed private Xvfb display on display-less Linux hosts,
   avoiding the headless-only Cloudflare block.
 
