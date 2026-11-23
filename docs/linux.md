@@ -91,11 +91,14 @@ state folder. Do not copy an entire Windows browser profile to Linux.
 ## Human checks on a headless server
 
 When a query encounters a Cloudflare challenge, ask-pro leaves Chrome open and
-returns `state: needs_human_check`, a `check_url`, and a `resume` command. The
-calling agent asks: **ask-pro needs a Cloudflare check clicked: <url>**.
-Open the link on your own device and click the verification checkbox in the
-live page. When it clears, the page says **Check cleared** automatically. Return
-to your agent so it can run the emitted resume command. There is no Done button.
+returns `state: needs_human_check` and a `check_url`. Your agent sends you the
+private check link and starts the printed `resume` command in the background
+when one is provided. If a verification check interrupts an answer
+from stdin and ask-pro prints a `reply` command, your agent saves those same
+answers in a JSON file and runs the printed command in the background.
+Open the link, click the Cloudflare verification control, and complete any
+further verification or use the refresh control if one is shown. Once the checks
+clear, the run continues automatically.
 
 The viewer binds `0.0.0.0`; its link uses the server hostname by default. If that
 name is not reachable from your devices, set `ASK_PRO_CHECK_HOST` to its Tailscale
@@ -106,14 +109,13 @@ export ASK_PRO_CHECK_HOST=100.123.207.19 # replace with your server's address
 ```
 
 Use Tailscale or another trusted encrypted private network; do not expose this
-HTTP port on the public internet. The random link key grants screenshot and click
-access to this one challenged tab for at most 15 minutes. It stays in the URL
-fragment so reloading works. Once the check clears, the viewer stops showing
-frames and closes shortly afterward; resume also closes the old viewer. Chrome
-stays open for recovery. If the link expires, ask the agent to resume for a new
-one. There is no keyboard, text forwarding, login viewer or tab selector. It
-never copies cookies or disguises browser automation. Real challenges are for
-the human alone; agents must not inspect screenshots or click their controls.
+HTTP port on the public internet. The viewer is limited to screenshots and clicks
+on the challenged Chrome tab, and the private link keeps its key in the URL
+fragment so reloading works. The viewer closes after the check clears, when the
+run moves on, when the Chrome tab closes, or after 24 hours. If the viewer
+disappears while a challenge is still pending, resuming returns a fresh link.
+Real challenges are for the human alone. Agents must never inspect screenshots
+or click their controls.
 
 A challenge before submission resumes the unsent question; a challenge after
 submission resumes the existing response. Login failures still use session

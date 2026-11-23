@@ -29,6 +29,10 @@
 
 ### Fixed
 
+- Headless runs continue automatically once Cloudflare verification clears. The
+  viewer relays follow-up checks for up to 24 hours. If it disappears while a
+  challenge remains pending, resuming returns a fresh link.
+
 - Ask-pro now provides a link to complete a Cloudflare check on headless Linux
   if one appears after sign-in and remains when the prompt box times out.
 

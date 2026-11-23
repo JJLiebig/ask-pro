@@ -7,6 +7,7 @@ import {
   AskProNeedsAuthError,
   resumeAskProBrowserSession,
 } from "../../src/ask-pro/browserRunner.js";
+import * as humanCheck from "../../src/ask-pro/humanCheck.js";
 import { readAskProQuestions, writeAskProQuestions } from "../../src/ask-pro/questions.js";
 import {
   createAskProSession,
@@ -46,7 +47,13 @@ describe("reattach browser lease", () => {
       const stateDir = path.join(cwd, "state");
       const profileDir = path.join(stateDir, "browser-profile");
       vi.stubEnv("ASK_PRO_STATE_DIR", stateDir);
+      vi.stubEnv("DISPLAY", "");
+      vi.stubEnv("WAYLAND_DISPLAY", "");
       try {
+        vi.spyOn(humanCheck, "saveHumanCheck").mockImplementation(
+          async (_dir, options) =>
+            `http://fixture.invalid:${options.chromePort}/${options.targetId}`,
+        );
         const session = await createAskProSession({
           cwd,
           question: "Recover this submitted prompt.",
@@ -148,6 +155,9 @@ describe("reattach browser lease", () => {
         const error = await outcome;
         expect(error).toBeInstanceOf(AskProNeedsAuthError);
         expect(error).toMatchObject({ reason: "challenge_detected" });
+        if (process.platform === "linux") {
+          expect(error).toMatchObject({ checkUrl: "http://fixture.invalid:9238/new-tab" });
+        }
         const { status } = await readAskProStatus({ cwd, sessionId: session.id });
         expect(status.status).toBe(answering ? "AWAITING_ANSWERS" : "NEEDS_USER_AUTH");
         const metadata = JSON.parse(
@@ -252,6 +262,102 @@ describe("reattach browser lease", () => {
       expect.objectContaining({ tabUrl: undefined, conversationId: undefined }),
       {},
     );
+  });
+  test("recovers a pending check on an owned tab after Chrome restores its URL under a new ID", async () => {
+    const conversationUrl = "https://chatgpt.com/c/saved-conversation";
+    const restoredTab = {
+      close: async () => {},
+      Input: {},
+      Runtime: {
+        evaluate: async ({ expression }: { expression: string }) => ({
+          result: { value: expression === "location.href" ? conversationUrl : 2 },
+        }),
+      },
+    } as unknown as ChromeClient;
+    const result = await resumeBrowserSession(
+      { chromePort: 9222, chromeTargetId: "original-tab", tabUrl: conversationUrl },
+      {},
+      vi.fn<(message: string) => void>(),
+      {
+        humanCheck: "resume",
+        listTargets: async () => [{ targetId: "restored-tab", type: "page", url: conversationUrl }],
+        connect: async () => restoredTab,
+        waitForAssistantResponse: async () => ({ text: "Response from restored tab", meta: {} }),
+        captureAssistantMarkdown: async () => null,
+        recoverSession: async () => ({
+          answerText: "Recovered response",
+          answerMarkdown: "Recovered response",
+          chromeMode: "relaunched",
+        }),
+      },
+    );
+    expect(result.answerText).toBe("Recovered response");
+  });
+  test.each([
+    ["saved conversation", true],
+    ["wrong conversation", true],
+    ["wrong conversation", false],
+  ])("checks the %s in the verified tab with answers=%s", async (destination, answering) => {
+    const conversationUrl = "https://chatgpt.com/c/saved-conversation";
+    let tabUrl = "https://chatgpt.com/";
+    let answered = false;
+    let waitedForQuestionCard = false;
+    let waitedForResponse = false;
+    const questions = [{ question: "Color?", options: ["Blue"], freeText: true }];
+    const client = {
+      close: async () => {},
+      Input: {},
+      Page: {
+        navigate: async ({ url }: { url: string }) => {
+          expect(url).toBe(conversationUrl);
+          tabUrl = destination === "saved conversation" ? url : "https://chatgpt.com/c/other";
+        },
+      },
+      Runtime: {
+        evaluate: async ({ expression }: { expression: string }) => {
+          let value: unknown = false;
+          if (expression === "location.href") value = tabUrl;
+          if (expression === "document.readyState") value = "interactive";
+          if (expression.includes("new MutationObserver")) waitedForQuestionCard = true;
+          if (expression.includes("const submission =")) {
+            expect(waitedForQuestionCard).toBe(true);
+            answered = true;
+            value = { questions, started: true };
+          }
+          return { result: { value } };
+        },
+      },
+    } as unknown as ChromeClient;
+    const resume = resumeBrowserSession(
+      { chromePort: 9222, chromeTargetId: "verified-tab", tabUrl: conversationUrl },
+      {},
+      vi.fn<(message: string) => void>(),
+      {
+        humanCheck: "resume",
+        listTargets: async () => [{ targetId: "verified-tab", type: "page", url: tabUrl }],
+        connect: async () => client,
+        questionAnswers: answering
+          ? { answers: [1], questions, submissionState: { started: false } }
+          : undefined,
+        waitForAssistantResponse: async () => {
+          waitedForResponse = true;
+          return { text: "Fresh answer: Blue", meta: {} };
+        },
+        captureAssistantMarkdown: async () => null,
+        recoverSession: async () => {
+          throw Error("Could not recover the conversation.");
+        },
+      },
+    );
+    if (destination === "saved conversation") {
+      expect((await resume).answerText).toBe("Fresh answer: Blue");
+      expect(answered).toBe(true);
+    } else {
+      await expect(resume).rejects.toThrow("Could not recover the conversation.");
+      expect(waitedForQuestionCard).toBe(false);
+      expect(answered).toBe(false);
+      expect(waitedForResponse).toBe(false);
+    }
   });
   test("does not treat ChatGPT's provisional WEB route as a saved conversation", () => {
     const provisional = "https://chatgpt.com/c/WEB:795d079e-6c4d-4334-b0ae-4534c70305bd";

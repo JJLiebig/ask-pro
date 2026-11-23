@@ -7,9 +7,10 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import CDP from "chrome-remote-interface";
-import { startHumanCheckServer } from "../dist/src/ask-pro/humanCheck.js";
+import { startHumanCheckServer, waitForHumanCheck } from "../dist/src/ask-pro/humanCheck.js";
 import { launchChrome, closeChromeGracefully } from "../dist/src/browser/chromeLifecycle.js";
 import { resolveBrowserConfig } from "../dist/src/browser/config.js";
+import { withTimeout } from "../dist/src/browser/reattachHelpers.js";
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-check-smoke-"));
 process.env.ASK_PRO_STATE_DIR = root;
 const fixture = http.createServer((_req, res) =>
@@ -20,27 +21,56 @@ const fixture = http.createServer((_req, res) =>
 await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
 const origin = "http://127.0.0.1:" + fixture.address().port;
 let chrome, relay, page, viewer;
-const wait = async (fn) => {
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    if (await fn()) return;
-    await new Promise((r) => setTimeout(r, 100));
+const frameReady = 'document.querySelector("#screen:not([hidden])")?.naturalWidth > 0';
+const waitForFixture = (promise, step) =>
+  withTimeout(promise, 10_000, `Fixture timed out waiting for ${step}`);
+async function openPage(port, url) {
+  const target = await CDP.New({ port, url: "about:blank" });
+  const client = await CDP({ port, target: target.id });
+  try {
+    await client.Page.enable();
+    const loaded = client.Page.loadEventFired();
+    await waitForFixture(Promise.all([client.Page.navigate({ url }), loaded]), "page load");
+    return { target, client };
+  } catch (error) {
+    await client.close().catch(() => {});
+    throw error;
   }
-  throw Error("Fixture timed out");
-};
+}
+async function waitForDocument(client, expression) {
+  const result = await waitForFixture(
+    client.Runtime.evaluate({
+      expression: `new Promise(resolve => {
+      const observer = new MutationObserver(check);
+      function check() {
+        if (!(${expression})) return;
+        observer.disconnect();
+        document.removeEventListener('load', check, true);
+        resolve(true);
+      }
+      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+      document.addEventListener('load', check, true);
+      check();
+    })`,
+      awaitPromise: true,
+      returnByValue: true,
+    }),
+    "viewer readiness",
+  );
+  assert.equal(result.result.value, true);
+}
+async function reload(client) {
+  const loaded = client.Page.loadEventFired();
+  await waitForFixture(Promise.all([client.Page.reload(), loaded]), "page reload");
+}
 try {
   chrome = await launchChrome(
     resolveBrowserConfig({ manualLogin: true }),
     path.join(root, "browser-profile"),
     () => {},
   );
-  const target = await CDP.New({ port: chrome.port, url: origin });
-  page = await CDP({ port: chrome.port, target: target.id });
-  await wait(
-    async () =>
-      (await page.Runtime.evaluate({ expression: "document.readyState" })).result.value ===
-      "complete",
-  );
+  const { target, client } = await openPage(chrome.port, origin);
+  page = client;
   relay = await startHumanCheckServer({
     chromePort: chrome.port,
     targetId: target.id,
@@ -69,25 +99,10 @@ try {
     ).status,
     404,
   );
-  const viewerTarget = await CDP.New({ port: chrome.port, url: relay.url });
-  viewer = await CDP({ port: chrome.port, target: viewerTarget.id });
-  await wait(
-    async () =>
-      (
-        await viewer.Runtime.evaluate({
-          expression: 'document.querySelector("#screen")?.naturalWidth>0',
-        })
-      ).result.value,
-  );
-  await viewer.Page.reload();
-  await wait(
-    async () =>
-      (
-        await viewer.Runtime.evaluate({
-          expression: 'document.querySelector("#screen")?.naturalWidth>0',
-        })
-      ).result.value,
-  );
+  viewer = (await openPage(chrome.port, relay.url)).client;
+  await waitForDocument(viewer, frameReady);
+  await reload(viewer);
+  await waitForDocument(viewer, frameReady);
   assert.equal(
     (await viewer.Runtime.evaluate({ expression: "location.hash" })).result.value,
     url.hash,
@@ -99,18 +114,13 @@ try {
       returnByValue: true,
     })
   ).result.value;
+  const resumed = waitForHumanCheck(url);
   // Click the viewer image, exercising its coordinate mapping and request, against the fake checkbox.
   await viewer.Runtime.evaluate({
     expression: `(()=>{const img=document.querySelector('#screen'),r=img.getBoundingClientRect();img.dispatchEvent(new MouseEvent('click',{clientX:r.x+${point.x}*r.width/img.naturalWidth,clientY:r.y+${point.y}*r.height/img.naturalHeight}));})()`,
   });
-  await wait(
-    async () =>
-      (
-        await viewer.Runtime.evaluate({
-          expression: 'document.querySelector("#status").textContent.includes("Check cleared")',
-        })
-      ).result.value,
-  );
+  assert.equal(await waitForFixture(resumed, "automatic resume"), true);
+  await waitForDocument(viewer, '!document.querySelector("#screen")');
   assert.equal(
     (await page.Runtime.evaluate({ expression: "document.title" })).result.value,
     "Check cleared",
@@ -126,31 +136,21 @@ try {
     origin,
     host: "127.0.0.1",
     bind: "127.0.0.1",
-    ttlMs: 100,
   });
   const second = new URL(relay.url);
-  assert.equal(
-    (
-      await fetch(second.origin + "/click", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer " + second.hash.slice(1),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(point),
-      })
-    ).status,
-    204,
-  );
+  const clickBehindCheck = await fetch(second.origin + "/click", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + second.hash.slice(1),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ...point, revision: 0 }),
+  });
+  assert.ok(clickBehindCheck.status === 202 || clickBehindCheck.status === 204);
   await relay.close();
   relay = undefined;
   // The independent viewer must survive the CLI controller exiting after handoff.
-  await page.Page.reload();
-  await wait(
-    async () =>
-      (await page.Runtime.evaluate({ expression: "document.title" })).result.value ===
-      "Just a moment...",
-  );
+  await reload(page);
   const moduleUrl = new URL("../dist/src/ask-pro/humanCheck.js", import.meta.url).href;
   const options = {
     chromePort: chrome.port,
@@ -180,7 +180,7 @@ try {
     await fetch(detachedUrl.origin + "/close", { method: "POST", headers: detachedHeaders });
   }
   console.log(
-    "smoke: passed\nchecks: access_control, no_keyboard, fragment_reload, viewer_click, automatic_clear, no_post_check_frames, detached_handoff",
+    "smoke: passed\nchecks: access_control, no_keyboard, fragment_reload, viewer_click, automatic_resume_signal, no_post_check_frames, detached_handoff",
   );
 } finally {
   await relay?.close();

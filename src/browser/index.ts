@@ -119,6 +119,20 @@ export function shouldPreserveBrowserOnErrorForTest(error: unknown, headless: bo
   return shouldPreserveBrowserOnError(error, headless);
 }
 
+function preservePromptNavigation(projectUrl: string): typeof navigateToChatGPT {
+  return async (page, runtime, url, logger) => {
+    // Reuse the project page only on the first attempt. The homepage retry needs a fresh load.
+    if (url === projectUrl) {
+      const { result } = await runtime.evaluate({
+        expression: "location.href",
+        returnByValue: true,
+      });
+      if (url === result.value) return;
+    }
+    await navigateToChatGPT(page, runtime, url, logger);
+  };
+}
+
 function hasBrowserErrorCode(error: unknown, code: string): boolean {
   return (
     error instanceof BrowserAutomationError &&
@@ -631,6 +645,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
 
   let client: ChromeClient | null = null;
   let isolatedTargetId: string | null = null;
+  let resumedPreservedTab = false;
   let launchTargetIds: string[] = [];
   let closedLaunchTabs = false;
   const closeLaunchTabs = async () => {
@@ -675,7 +690,18 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
 
   try {
     try {
-      if (config.browserTabRef) {
+      const resumeTarget = options.resumeTarget;
+      if (resumeTarget?.chromePort === chrome.port) {
+        client = await CDP({
+          host: chromeHost,
+          port: chrome.port,
+          target: resumeTarget.targetId,
+        }).catch(() => null);
+      }
+      if (client && resumeTarget) {
+        isolatedTargetId = lastTargetId = resumeTarget.targetId;
+        resumedPreservedTab = true;
+      } else if (config.browserTabRef) {
         const attached = await connectToExistingChatGptTab({
           host: chromeHost,
           port: chrome.port,
@@ -915,9 +941,19 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     }
 
     const baseUrl = CHATGPT_URL;
+    const currentUrl = resumedPreservedTab
+      ? (
+          await raceWithDisconnect(
+            Runtime.evaluate({ expression: "location.href", returnByValue: true }),
+          )
+        ).result.value
+      : undefined;
+    const alreadyAtPromptUrl = currentUrl === config.url;
     // First load the base ChatGPT homepage to satisfy potential interstitials,
     // then hop to the requested URL if it differs.
-    await raceWithDisconnect(navigateToChatGPT(Page, Runtime, baseUrl, logger));
+    if (!alreadyAtPromptUrl && currentUrl !== baseUrl) {
+      await raceWithDisconnect(navigateToChatGPT(Page, Runtime, baseUrl, logger));
+    }
     await raceWithDisconnect(ensureNotBlocked(Runtime, config.headless, logger));
     // Learned: login checks must happen on the base domain before jumping into project URLs.
     if (manualLogin) manualLoginRecoveryInProgress = true;
@@ -958,7 +994,12 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
             headless: config.headless,
             logger,
           },
-          { ensurePromptReady: ensurePromptReadyForRun },
+          {
+            navigateToChatGPT: alreadyAtPromptUrl
+              ? preservePromptNavigation(config.url)
+              : undefined,
+            ensurePromptReady: ensurePromptReadyForRun,
+          },
         ),
       );
     } else {
@@ -3030,6 +3071,7 @@ export const __test__ = {
   isConversationUrl,
   waitForLogin,
   waitForAssistantResponseWithReload,
+  preservePromptNavigation,
 };
 export { syncCookies } from "./cookies.js";
 export {
