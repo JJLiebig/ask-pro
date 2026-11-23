@@ -1,4 +1,5 @@
 import type { ChromeClient, BrowserLogger } from "../types.js";
+import { isHeadlessLinux } from "../config.js";
 import { CLOUDFLARE_TITLE, INPUT_SELECTORS } from "../constants.js";
 import { delay } from "../utils.js";
 import { logDomFailure } from "../domDebug.js";
@@ -152,10 +153,12 @@ export async function navigateToPromptReadyWithFallback(
     await ensureReady(Runtime, timeoutMs, logger);
     return { usedFallback: false };
   } catch (error) {
+    const stage = error instanceof BrowserAutomationError ? error.details?.stage : undefined;
     if (
       !fallbackUrl ||
       fallbackUrl === url ||
-      (error instanceof BrowserAutomationError && error.details?.stage === "cloudflare-challenge")
+      stage === "cloudflare-challenge" ||
+      stage === "login-required"
     ) {
       throw error;
     }
@@ -404,23 +407,24 @@ export async function ensurePromptReady(
   Runtime: ChromeClient["Runtime"],
   timeoutMs: number,
   logger: BrowserLogger,
+  { waitForManualLogin = true }: { waitForManualLogin?: boolean } = {},
 ) {
-  const ready = await waitForPrompt(Runtime, timeoutMs);
-  if (!ready) {
-    const authUrl = await currentUrl(Runtime);
-    if (authUrl && isAuthLoginUrl(authUrl)) {
-      // Learned: auth.openai.com/login can appear after cookies are copied; allow manual login window.
-      logger("Auth login page detected; waiting for manual login to complete...");
-      const extended = Math.min(Math.max(timeoutMs, 60_000), 20 * 60_000);
-      const loggedIn = await waitForPrompt(Runtime, extended);
-      if (loggedIn) {
-        return;
-      }
-    }
+  if (await waitForPrompt(Runtime, timeoutMs)) return;
+
+  await ensureNotBlocked(Runtime, undefined, logger);
+  let onLoginPage = isAuthLoginUrl(await currentUrl(Runtime));
+  if (onLoginPage && waitForManualLogin && !isHeadlessLinux()) {
+    logger("Auth login page detected; waiting for manual login to complete...");
+    const extended = Math.min(Math.max(timeoutMs, 60_000), 20 * 60_000);
+    if (await waitForPrompt(Runtime, extended)) return;
     await ensureNotBlocked(Runtime, undefined, logger);
-    await logDomFailure(Runtime, logger, "prompt-textarea");
-    throw new Error("Prompt textarea did not appear before timeout");
+    onLoginPage = isAuthLoginUrl(await currentUrl(Runtime));
   }
+  if (onLoginPage) {
+    throw new BrowserAutomationError("ChatGPT login required.", { stage: "login-required" });
+  }
+  await logDomFailure(Runtime, logger, "prompt-textarea");
+  throw new Error("Prompt textarea did not appear before timeout");
 }
 
 async function waitForDocumentReady(Runtime: ChromeClient["Runtime"], timeoutMs: number) {
@@ -446,13 +450,16 @@ async function currentUrl(Runtime: ChromeClient["Runtime"]): Promise<string | nu
   return typeof result?.value === "string" ? result.value : null;
 }
 
-function isAuthLoginUrl(url: string): boolean {
+// Keep this self-contained so the login probe can run it in the page.
+function isAuthLoginUrl(url: string | null): boolean {
+  if (!url) return false;
   try {
-    const parsed = new URL(url);
-    if (parsed.hostname.includes("auth.openai.com")) {
-      return true;
-    }
-    return /^\/log-?in/i.test(parsed.pathname);
+    const { hostname, pathname } = new URL(url);
+    return (
+      hostname === "auth.openai.com" ||
+      (/(?:^|\.)(?:chatgpt|openai|auth0)\.com$/.test(hostname) &&
+        /^\/(?:auth|log-?in|sign-?in)(?:\/|$)/i.test(pathname))
+    );
   } catch {
     return false;
   }
@@ -506,8 +513,6 @@ async function isCloudflareInterstitial(Runtime: ChromeClient["Runtime"]): Promi
 type LoginProbeResult = {
   ok: boolean;
   status: number;
-  url?: string | null;
-  redirected?: boolean;
   error?: string | null;
   pageUrl?: string | null;
   domLoginCta?: boolean;
@@ -516,14 +521,7 @@ type LoginProbeResult = {
 
 function buildLoginProbeExpression(timeoutMs: number): string {
   return `(async () => {
-    // Learned: /backend-api/me is the most reliable "am I logged in" signal.
-    // Some UIs render without a session; use DOM + network for a robust answer.
-    const timer = setTimeout(() => {}, ${timeoutMs});
-    const pageUrl = typeof location === 'object' && location?.href ? location.href : null;
-    const onAuthPage =
-      typeof location === 'object' &&
-      typeof location.pathname === 'string' &&
-      /^\\/(auth|login|signin)/i.test(location.pathname);
+    const isLoginUrl = (${isAuthLoginUrl.toString()});
 
     const hasLoginCta = () => {
       const candidates = Array.from(
@@ -563,19 +561,20 @@ function buildLoginProbeExpression(timeoutMs: number): string {
     };
 
     let status = 0;
+    let redirectedToLogin = false;
     let error = null;
     try {
       if (typeof fetch === 'function') {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), ${timeoutMs});
         try {
-          // Credentials included so we see a 200 only when cookies are valid.
           const response = await fetch('/backend-api/me', {
             cache: 'no-store',
             credentials: 'include',
             signal: controller.signal,
           });
           status = response.status || 0;
+          redirectedToLogin = response.redirected && isLoginUrl(response.url);
         } finally {
           clearTimeout(timeout);
         }
@@ -584,14 +583,12 @@ function buildLoginProbeExpression(timeoutMs: number): string {
       error = err ? String(err) : 'unknown';
     }
 
+    const pageUrl = typeof location === 'object' && location?.href ? location.href : null;
+    const onAuthPage = isLoginUrl(pageUrl);
     const domLoginCta = hasLoginCta();
-    const loginSignals = domLoginCta || onAuthPage;
-    clearTimeout(timer);
     return {
-      ok: !loginSignals && (status === 0 || status === 200),
+      ok: !domLoginCta && !onAuthPage && !redirectedToLogin && (status === 0 || status === 200),
       status,
-      redirected: false,
-      url: pageUrl,
       pageUrl,
       domLoginCta,
       onAuthPage,
@@ -616,8 +613,6 @@ function normalizeLoginProbe(raw: unknown): LoginProbeResult {
   return {
     ok: Boolean(value.ok),
     status: Number.isFinite(status) ? (status as number) : 0,
-    url: typeof value.url === "string" ? value.url : null,
-    redirected: Boolean(value.redirected),
     error: typeof value.error === "string" ? value.error : null,
     pageUrl: typeof value.pageUrl === "string" ? value.pageUrl : null,
     domLoginCta: Boolean(value.domLoginCta),
