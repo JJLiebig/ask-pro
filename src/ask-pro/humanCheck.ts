@@ -32,7 +32,9 @@ const MONITOR_BINDING = "reportAskProHumanCheck";
 const CHALLENGE_FRAMES =
   'iframe[src*="challenges.cloudflare.com"],iframe[src*="/challenge-platform/" i],iframe[src*="captcha" i]';
 const CHALLENGE_CONTAINERS = 'form,[role="dialog"]';
+const FRAME_REVISION_HEADER = "X-Check-Revision";
 type CheckState = "challenge" | "loading" | "clear";
+type CheckClick = { x: number; y: number; revision: number };
 
 function checkStateExpression(origin: string) {
   return `(() => {
@@ -178,7 +180,13 @@ export async function startHumanCheckServer(
       void probe(c).catch(() => {});
     });
     c.Runtime.bindingCalled(({ name, payload }) => {
-      if (name === MONITOR_BINDING) observe(payload);
+      if (name !== MONITOR_BINDING) return;
+      if (payload === "challenge-changed") {
+        revision += 1;
+        observe("challenge");
+      } else {
+        observe(payload);
+      }
     });
     await c.Runtime.addBinding({ name: MONITOR_BINDING, executionContextName: MONITOR_WORLD });
     await c.Page.addScriptToEvaluateOnNewDocument({
@@ -187,25 +195,31 @@ export async function startHumanCheckServer(
       source: `(() => {
         if (window !== window.top) return;
         let last;
-        let watched = new Set();
+        let watched = new Map();
         const size = new ResizeObserver(observe);
         const visibility = new IntersectionObserver(observe, { trackVisibility: true, delay: 100 });
         function observe() {
           const surfaces = location.origin === ${JSON.stringify(options.origin ?? CHATGPT_ORIGIN)}
-            ? new Set(document.querySelectorAll(${JSON.stringify(`${CHALLENGE_FRAMES},${CHALLENGE_CONTAINERS}`)}))
-            : new Set();
-          for (const el of watched) {
+            ? new Map(Array.from(document.querySelectorAll(${JSON.stringify(`${CHALLENGE_FRAMES},${CHALLENGE_CONTAINERS}`)}),
+                el => [el, el.getAttribute('src')]))
+            : new Map();
+          let changed = surfaces.size !== watched.size;
+          for (const el of watched.keys()) {
             if (surfaces.has(el)) continue;
             size.unobserve(el);
             visibility.unobserve(el);
           }
-          for (const el of surfaces) {
+          for (const [el, src] of surfaces) {
+            if (!watched.has(el) || watched.get(el) !== src) changed = true;
             if (watched.has(el)) continue;
             size.observe(el);
             visibility.observe(el);
           }
           watched = surfaces;
           const next = ${expression};
+          if (next === 'challenge' && last === next && changed) {
+            ${MONITOR_BINDING}('challenge-changed');
+          }
           if (next === last) return;
           last = next;
           ${MONITOR_BINDING}(next);
@@ -274,7 +288,7 @@ export async function startHumanCheckServer(
         res.writeHead(204).end();
         return;
       }
-      let point: { x: number; y: number } | undefined;
+      let point: CheckClick | undefined;
       if (req.url === "/click") {
         let raw = "";
         for await (const chunk of req) {
@@ -284,9 +298,11 @@ export async function startHumanCheckServer(
             return;
           }
         }
-        point = JSON.parse(raw) as { x: number; y: number };
+        point = JSON.parse(raw) as CheckClick | undefined;
         if (
-          ![point.x, point.y].every((v) => typeof v === "number" && Number.isFinite(v) && v >= 0)
+          !point ||
+          ![point.x, point.y].every((v) => typeof v === "number" && Number.isFinite(v) && v >= 0) ||
+          !Number.isSafeInteger(point.revision)
         ) {
           res.writeHead(400).end();
           return;
@@ -299,7 +315,13 @@ export async function startHumanCheckServer(
       if (point) await c.Page.bringToFront();
       const checkedAt = revision;
       const before = await probe(c);
-      if (before !== "challenge" || navigating || state !== "watching" || revision !== checkedAt) {
+      if (
+        before !== "challenge" ||
+        navigating ||
+        state !== "watching" ||
+        revision !== checkedAt ||
+        (point && point.revision !== revision)
+      ) {
         res.writeHead(202).end();
         return;
       }
@@ -326,6 +348,7 @@ export async function startHumanCheckServer(
             return;
           }
           res.setHeader("Content-Type", "image/jpeg");
+          res.setHeader(FRAME_REVISION_HEADER, String(capturedAt));
           res.end(Buffer.from(frame.data, "base64"));
         } finally {
           res.removeListener("close", cancel);

@@ -207,13 +207,13 @@ async function readTabUrl(Runtime: ChromeClient["Runtime"]) {
   return typeof result.value === "string" ? result.value : "";
 }
 
-async function verifyAnswerConversation(
+async function verifySavedConversation(
   Runtime: ChromeClient["Runtime"],
   runtime: BrowserRuntimeMetadata,
 ) {
   const expectedId = savedConversationId(runtime);
   if (expectedId && extractConversationIdFromUrl(await readTabUrl(Runtime)) !== expectedId) {
-    throw new Error("Unable to open the saved ChatGPT conversation for these answers.");
+    throw new Error("Unable to open the saved ChatGPT conversation.");
   }
 }
 
@@ -393,9 +393,11 @@ export async function resumeBrowserSession(
       await ensureNotBlocked(Runtime, resolvedConfig.headless, logger);
     }
     await ensureConversationOpen();
+    if (deps.humanCheck === "resume" || (deps.humanCheck && deps.questionAnswers)) {
+      await verifySavedConversation(Runtime, runtime);
+    }
     let minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     if (deps.questionAnswers) {
-      if (deps.humanCheck) await verifyAnswerConversation(Runtime, runtime);
       answeringQuestions = true;
       const replyBoundary = await answerAssistantQuestions(
         Runtime,
@@ -745,12 +747,14 @@ async function resumeBrowserSessionViaNewChrome(
       await waitForLocationChange(Runtime, 15_000);
     }
 
+    if (deps.humanCheck === "resume" || (deps.humanCheck && deps.questionAnswers)) {
+      await verifySavedConversation(Runtime, runtime);
+    }
     const waitForResponse = deps.waitForAssistantResponse ?? waitForAssistantResponse;
     const captureMarkdown = deps.captureAssistantMarkdown ?? captureAssistantMarkdown;
     const timeoutMs = resolved.timeoutMs ?? 120_000;
     let minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     if (deps.questionAnswers) {
-      if (deps.humanCheck) await verifyAnswerConversation(Runtime, runtime);
       const replyBoundary = await answerAssistantQuestions(
         Runtime,
         client.Input,

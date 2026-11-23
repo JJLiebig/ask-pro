@@ -20,6 +20,7 @@ const fixture = http.createServer((_req, res) =>
 await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
 const origin = "http://127.0.0.1:" + fixture.address().port;
 let chrome, relay, page, viewer;
+const frameReady = 'document.querySelector("#screen:not([hidden])")?.naturalWidth > 0';
 async function openPage(port, url) {
   const target = await CDP.New({ port, url: "about:blank" });
   const client = await CDP({ port, target: target.id });
@@ -90,9 +91,9 @@ try {
     404,
   );
   viewer = (await openPage(chrome.port, relay.url)).client;
-  await waitForDocument(viewer, 'document.querySelector("#screen")?.naturalWidth > 0');
+  await waitForDocument(viewer, frameReady);
   await reload(viewer);
-  await waitForDocument(viewer, 'document.querySelector("#screen")?.naturalWidth > 0');
+  await waitForDocument(viewer, frameReady);
   assert.equal(
     (await viewer.Runtime.evaluate({ expression: "location.hash" })).result.value,
     url.hash,
@@ -134,7 +135,7 @@ try {
       Authorization: "Bearer " + second.hash.slice(1),
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(point),
+    body: JSON.stringify({ ...point, revision: 0 }),
   });
   assert.ok(clickBehindCheck.status === 202 || clickBehindCheck.status === 204);
   await relay.close();

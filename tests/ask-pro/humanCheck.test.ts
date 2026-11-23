@@ -20,8 +20,10 @@ function fakeChallenge() {
   const origin = "http://fixture.invalid";
   let inlineChallenge = false;
   let visible = true;
+  let source = "http://fixture.invalid/captcha-one";
   const iframe = {
     getBoundingClientRect: () => ({ width: visible ? 100 : 0, height: 100 }),
+    getAttribute: () => source,
   };
   const document = {
     title: "Just a moment...",
@@ -132,6 +134,10 @@ function fakeChallenge() {
       inlineChallenge = true;
       onMutation();
     },
+    replaceInlineChallenge: () => {
+      source = "http://fixture.invalid/captcha-two";
+      onMutation();
+    },
     hideIframeWithoutMutation: () => {
       visible = false;
     },
@@ -150,9 +156,10 @@ function request(
     method?: "GET" | "POST";
     authorized?: boolean;
     onHeaders?: () => void;
+    revision?: number;
   } = {},
 ) {
-  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+  return new Promise<{ status: number; body: string; revision?: number }>((resolve, reject) => {
     const req = http.request(
       new URL(route, url),
       {
@@ -165,13 +172,22 @@ function request(
         let body = "";
         res.setEncoding("utf8");
         res.on("data", (chunk: string) => (body += chunk));
-        res.on("end", () => resolve({ status: res.statusCode!, body }));
+        res.on("end", () => {
+          const header = res.headers["x-check-revision"];
+          resolve({ status: res.statusCode!, body, ...(header && { revision: Number(header) }) });
+        });
         res.on("error", reject);
       },
     );
     req.on("error", reject);
-    req.end(route === "/click" ? JSON.stringify({ x: 4, y: 5 }) : undefined);
+    req.end(
+      route === "/click" ? JSON.stringify({ x: 4, y: 5, revision: options.revision }) : undefined,
+    );
   });
+}
+
+function click(url: URL, revision: number | undefined) {
+  return request(url, "/click", { method: "POST", revision });
 }
 
 function openWait(url: URL) {
@@ -208,10 +224,11 @@ test("keeps the same viewer through a follow-up navigation and wakes the waiter 
   await wait.attached;
   await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
   expect(waiting).toBe(true);
-  expect(await request(url, "/frame")).toEqual({ status: 200, body: "fake challenge" });
-  expect((await request(url, "/click", { method: "POST" })).status).toBe(202);
+  const first = await request(url, "/frame");
+  expect(first).toMatchObject({ status: 200, body: "fake challenge" });
+  expect((await click(url, first.revision)).status).toBe(202);
   expect(await request(url, "/frame")).toEqual({ status: 202, body: "" });
-  expect((await request(url, "/click", { method: "POST" })).status).toBe(202);
+  expect((await click(url, first.revision)).status).toBe(202);
   expect(fixture.clicks()).toBe(1);
 
   await vi.advanceTimersByTimeAsync(1_000);
@@ -219,8 +236,11 @@ test("keeps the same viewer through a follow-up navigation and wakes the waiter 
   await vi.advanceTimersByTimeAsync(2_000);
   expect(waiting).toBe(true);
   fixture.loadFollowUp();
-  expect(await request(url, "/frame")).toEqual({ status: 200, body: "fake challenge" });
-  expect((await request(url, "/click", { method: "POST" })).status).toBe(202);
+  const second = await request(url, "/frame");
+  expect(second).toMatchObject({ status: 200, body: "fake challenge" });
+  expect((await click(url, first.revision)).status).toBe(202);
+  expect(fixture.clicks()).toBe(1);
+  expect((await click(url, second.revision)).status).toBe(202);
   await vi.advanceTimersByTimeAsync(2_000);
   expect(await result).toEqual({ status: 200, body: "cleared" });
   expect(fixture.clicks()).toBe(2);
@@ -243,8 +263,9 @@ test("lets a frame's fresh visibility check settle a hidden challenge iframe", a
   fixture.showInlineChallenge();
   const wait = openWait(url);
   await wait.attached;
-  expect((await request(url, "/frame")).status).toBe(200);
-  expect((await request(url, "/click", { method: "POST" })).status).toBe(200);
+  const frame = await request(url, "/frame");
+  expect(frame.status).toBe(200);
+  expect((await click(url, frame.revision)).status).toBe(200);
   fixture.hideIframeWithoutMutation();
   expect(await request(url, "/frame")).toEqual({ status: 202, body: "" });
   await vi.advanceTimersByTimeAsync(2_000);
@@ -256,7 +277,12 @@ test("settles an inline challenge that disappears after the phone sends its last
   fixture.showInlineChallenge();
   const wait = openWait(url);
   await wait.attached;
-  expect((await request(url, "/click", { method: "POST" })).status).toBe(200);
+  const initial = await request(url, "/frame");
+  fixture.replaceInlineChallenge();
+  expect((await click(url, initial.revision)).status).toBe(202);
+  expect(fixture.clicks()).toBe(0);
+  const replacement = await request(url, "/frame");
+  expect((await click(url, replacement.revision)).status).toBe(200);
   fixture.resizeIframe();
   await vi.advanceTimersByTimeAsync(2_000);
   expect(await wait.response).toEqual({ status: 200, body: "cleared" });
