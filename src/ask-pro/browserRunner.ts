@@ -614,6 +614,8 @@ async function resumeAskProBrowserSessionWithLease({
     }
     const answersPending = questionAnswers && !questionAnswers.submissionState.started;
     if (isAuthGateError(error)) {
+      const reason = classifyBrowserError(error);
+      const retryAnswers = answersPending && reason === "challenge_detected";
       const currentMetadata = await readBrowserMetadata(paths.browser).catch(() => metadata);
       const reason = classifyBrowserError(error);
       const retryAnswers = answersPending && reason === "challenge_detected";

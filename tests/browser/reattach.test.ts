@@ -1,7 +1,21 @@
+import { ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import {
+  AskProNeedsAuthError,
+  resumeAskProBrowserSession,
+} from "../../src/ask-pro/browserRunner.js";
+import * as humanCheck from "../../src/ask-pro/humanCheck.js";
+import { readAskProQuestions, writeAskProQuestions } from "../../src/ask-pro/questions.js";
+import {
+  createAskProSession,
+  readAskProStatus,
+  updateAskProStatus,
+  writeAskProBrowserMetadata,
+} from "../../src/ask-pro/session.js";
+import * as chromeLifecycle from "../../src/browser/chromeLifecycle.js";
 import { resumeBrowserSession } from "../../src/browser/reattach.js";
 import { AssistantStoppedError } from "../../src/browser/errors.js";
 import { AssistantQuestionsError } from "../../src/browser/actions/questions.js";
@@ -25,6 +39,151 @@ afterEach(async () => {
 });
 
 describe("reattach browser lease", () => {
+  test.each([false, true])(
+    "hands off a late challenge on the relaunched tab (answering: %s)",
+    async (answering) => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-reattach-challenge-"));
+      tempDirs.push(cwd);
+      const stateDir = path.join(cwd, "state");
+      const profileDir = path.join(stateDir, "browser-profile");
+      vi.stubEnv("ASK_PRO_STATE_DIR", stateDir);
+      vi.stubEnv("DISPLAY", "");
+      vi.stubEnv("WAYLAND_DISPLAY", "");
+      try {
+        vi.spyOn(humanCheck, "saveHumanCheck").mockImplementation(
+          async (_dir, options) =>
+            `http://fixture.invalid:${options.chromePort}/${options.targetId}`,
+        );
+        const session = await createAskProSession({
+          cwd,
+          question: "Recover this submitted prompt.",
+          filePatterns: [],
+          dryRun: false,
+        });
+        await writeAskProBrowserMetadata({
+          cwd,
+          sessionId: session.id,
+          metadata: {
+            schemaVersion: 1,
+            status: answering ? "awaiting_answers" : "wait_timed_out",
+            url: "https://chatgpt.com/",
+            profileDir,
+            runtime: {
+              chromePort: 9230,
+              chromeBrowserWSEndpoint: "ws://127.0.0.1:9230/devtools/browser/old",
+              chromeTargetId: "old-tab",
+              conversationId: "submitted-conversation",
+              promptSubmitted: true,
+            },
+          },
+        });
+        let answers: string | undefined;
+        if (answering) {
+          await writeAskProQuestions(session.dir, [
+            { question: "Which color?", options: ["Blue"], freeText: true },
+          ]);
+          const { requestId } = await readAskProQuestions(session.dir);
+          answers = JSON.stringify({ requestId, answers: [1] });
+        }
+        await updateAskProStatus({
+          cwd,
+          sessionId: session.id,
+          status: answering ? "AWAITING_ANSWERS" : "WAIT_TIMED_OUT",
+        });
+
+        let composerProbed!: () => void;
+        const composerProbe = new Promise<void>((resolve) => {
+          composerProbed = resolve;
+        });
+        const document = {
+          readyState: "complete",
+          title: "ChatGPT",
+          querySelector: () => null,
+          querySelectorAll: () => [],
+        };
+        const location = { href: "https://chatgpt.com/", pathname: "/" };
+        const client = {
+          Page: { navigate: async () => {} },
+          Runtime: {
+            evaluate: async ({ expression }: { expression: string }) => {
+              if (expression.includes("const selectors =")) composerProbed();
+              return {
+                result: {
+                  value: await new Function(
+                    "document",
+                    "location",
+                    "fetch",
+                    `return ${expression}`,
+                  )(document, location, async () => ({ status: 200 })),
+                },
+              };
+            },
+          },
+          close: async () => {},
+        } as unknown as ChromeClient;
+        vi.spyOn(chromeLifecycle, "listRemoteChromeTargets").mockRejectedValue(
+          new Error("Original Chrome is unavailable"),
+        );
+        vi.spyOn(chromeLifecycle, "maybeReuseRunningChrome").mockResolvedValue(null);
+        vi.spyOn(chromeLifecycle, "launchChrome").mockResolvedValue({
+          pid: 2_147_483_647,
+          port: 9238,
+          process: new ChildProcess(),
+          remoteDebuggingPipes: null,
+          kill: () => {},
+        });
+        vi.spyOn(chromeLifecycle, "shouldLaunchChromeMinimized").mockReturnValue(false);
+        vi.spyOn(chromeLifecycle, "connectWithNewTab").mockResolvedValue({
+          client,
+          targetId: "new-tab",
+        });
+        const closeTab = vi.spyOn(chromeLifecycle, "closeTab").mockResolvedValue(undefined);
+        const closeChrome = vi
+          .spyOn(chromeLifecycle, "closeChromeGracefully")
+          .mockResolvedValue(undefined);
+
+        vi.useFakeTimers();
+        const outcome = resumeAskProBrowserSession({ cwd, sessionId: session.id, answers }).catch(
+          (error: unknown) => error,
+        );
+        expect(
+          await Promise.race([composerProbe.then(() => true), outcome.then(() => false)]),
+        ).toBe(true);
+        document.title = "Just a moment...";
+        await vi.advanceTimersByTimeAsync(90_000);
+
+        const error = await outcome;
+        expect(error).toBeInstanceOf(AskProNeedsAuthError);
+        expect(error).toMatchObject({ reason: "challenge_detected" });
+        if (process.platform === "linux") {
+          expect(error).toMatchObject({ checkUrl: "http://fixture.invalid:9238/new-tab" });
+        }
+        const { status } = await readAskProStatus({ cwd, sessionId: session.id });
+        expect(status.status).toBe(answering ? "AWAITING_ANSWERS" : "NEEDS_USER_AUTH");
+        const metadata = JSON.parse(
+          await fs.readFile(path.join(session.dir, "browser.json"), "utf8"),
+        );
+        expect(metadata).toMatchObject({
+          status: answering ? "awaiting_answers" : "needs_user_auth",
+          chromeMode: "relaunched",
+          runtime: {
+            chromePort: 9238,
+            chromeTargetId: "new-tab",
+            conversationId: "submitted-conversation",
+            promptSubmitted: true,
+          },
+        });
+        expect(metadata.runtime).not.toHaveProperty("chromeBrowserWSEndpoint");
+        expect(closeChrome).not.toHaveBeenCalled();
+        expect(closeTab).not.toHaveBeenCalled();
+      } finally {
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
   test.each(["native", "expired"])(
     "captures the answer after %s questions are submitted",
     async (mode) => {

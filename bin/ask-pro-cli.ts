@@ -496,6 +496,9 @@ async function printAuthInstructions(
       action: "send_check_link_and_resume",
       resume: replayStdin ? undefined : resume,
       reply: replayStdin ? `${resumeCommand} --answers <answers.json>` : undefined,
+      help: replayStdin
+        ? "Save the same answers to a JSON file and run the reply command."
+        : undefined,
     });
     return;
   }
