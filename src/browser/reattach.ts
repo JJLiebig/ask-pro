@@ -257,10 +257,6 @@ export async function resumeBrowserSession(
         })) as TargetInfoLite[]);
     const targetList = (await listTargets()) as TargetInfoLite[];
     const target = pickTarget(targetList, liveRuntime);
-    // The viewer must only be handed a tab owned by this session.
-    if (deps.humanCheckRuntimeCb && target?.targetId !== liveRuntime.chromeTargetId) {
-      throw Error("Saved challenge tab is unavailable.");
-    }
     const connection =
       browserWSEndpoint && !deps.connect
         ? await connectToRemoteChromeTarget(host, port ?? 9222, logger, {
@@ -647,17 +643,19 @@ async function resumeBrowserSessionViaNewChrome(
       await windowTransitionLock?.release();
     }
     if (!client) throw new Error("Failed to connect to managed Chrome.");
-    await deps.humanCheckRuntimeCb?.({
-      ...runtime,
-      chromePort: chrome.port,
-      chromeHost,
-      chromePid: chrome.pid,
-      chromeTargetId: isolatedTargetId,
-      chromeBrowserWSEndpoint: undefined,
-      chromeProfileRoot: userDataDir,
-      userDataDir,
-      controllerPid: process.pid,
-    });
+    if (isolatedTargetId) {
+      await deps.humanCheckRuntimeCb?.({
+        ...runtime,
+        chromePort: chrome.port,
+        chromeHost,
+        chromePid: chrome.pid,
+        chromeTargetId: isolatedTargetId,
+        chromeBrowserWSEndpoint: undefined,
+        chromeProfileRoot: userDataDir,
+        userDataDir,
+        controllerPid: process.pid,
+      });
+    }
     const { Network, Page, Runtime, DOM } = client;
 
     if (Runtime?.enable) {

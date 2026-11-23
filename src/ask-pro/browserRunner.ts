@@ -412,10 +412,11 @@ async function resumeAskProBrowserSessionWithLease({
         ? ASK_PRO_CHATGPT_URL
         : (metadata.url ?? ASK_PRO_TEMPORARY_CHATGPT_URL);
   const fallbackProfile = await resolveResumeBrowserProfile(metadata);
+  const headless = isHeadlessLinux();
   const waitingForHumanCheck =
+    headless &&
     sessionStatus.status === "NEEDS_USER_AUTH" &&
-    sessionStatus.reason === "challenge_detected" &&
-    isHeadlessLinux();
+    sessionStatus.reason === "challenge_detected";
   const checkTarget = waitingForHumanCheck ? humanCheckTarget(metadata.runtime) : undefined;
   const check = await resumeHumanCheck(paths.dir, checkTarget);
   if (check === "challenge" || check === "loading") {
@@ -538,7 +539,7 @@ async function resumeAskProBrowserSessionWithLease({
           await fs.rm(path.join(paths.dir, "QUESTIONS.json"), { force: true });
         },
         promptPreview: prompt,
-        humanCheckRuntimeCb: waitingForHumanCheck
+        humanCheckRuntimeCb: headless
           ? async (runtime) => {
               metadata.runtime = runtime;
               const current = await readBrowserMetadata(paths.browser);

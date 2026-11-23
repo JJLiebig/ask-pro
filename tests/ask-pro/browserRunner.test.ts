@@ -1104,7 +1104,7 @@ describe("ask-pro browser runner", () => {
     },
   );
 
-  test.each(["link expired", "Chrome restarted"])(
+  test.each(["link expired", "Chrome restarted", "resuming a timed-out run"])(
     "hands back a fresh viewer after %s",
     async (failure) => {
       const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-expired-check-"));
@@ -1115,11 +1115,12 @@ describe("ask-pro browser runner", () => {
         filePatterns: [],
         dryRun: false,
       });
+      const timedOut = failure === "resuming a timed-out run";
       await writeAskProBrowserMetadata({
         cwd,
         sessionId: session.id,
         metadata: {
-          status: "needs_user_auth",
+          status: timedOut ? "wait_timed_out" : "needs_user_auth",
           profileDir: testSharedProfileDir(),
           runtime: { chromePort: 9222, chromeTargetId: "challenge-tab", promptSubmitted: true },
         },
@@ -1127,13 +1128,13 @@ describe("ask-pro browser runner", () => {
       await updateAskProStatus({
         cwd,
         sessionId: session.id,
-        status: "NEEDS_USER_AUTH",
-        reason: "challenge_detected",
+        status: timedOut ? "WAIT_TIMED_OUT" : "NEEDS_USER_AUTH",
+        reason: timedOut ? "assistant_timeout" : "challenge_detected",
       });
       isHeadlessLinuxMock.mockReturnValueOnce(true).mockReturnValueOnce(true);
-      const restarted = failure === "Chrome restarted";
-      resumeHumanCheckMock.mockResolvedValueOnce(restarted ? "unavailable" : "challenge");
-      if (restarted) {
+      const reopened = failure !== "link expired";
+      resumeHumanCheckMock.mockResolvedValueOnce(reopened ? "unavailable" : "challenge");
+      if (reopened) {
         resumeBrowserSessionMock.mockImplementationOnce(async (...args: unknown[]) => {
           const deps = args[3] as ReattachDeps;
           await deps.humanCheckRuntimeCb!({
@@ -1153,7 +1154,7 @@ describe("ask-pro browser runner", () => {
         resumeAskProBrowserSession({ cwd, sessionId: session.id }),
       ).rejects.toMatchObject({
         reason: "challenge_detected",
-        checkUrl: restarted
+        checkUrl: reopened
           ? "http://fixture.invalid:9223/recovered-tab"
           : "http://fixture.invalid:9222/challenge-tab",
       });
@@ -1162,7 +1163,7 @@ describe("ask-pro browser runner", () => {
       );
       expect(closeTabMock).not.toHaveBeenCalled();
       expect(runBrowserModeMock).not.toHaveBeenCalled();
-      expect(resumeBrowserSessionMock).toHaveBeenCalledTimes(restarted ? 1 : 0);
+      expect(resumeBrowserSessionMock).toHaveBeenCalledTimes(reopened ? 1 : 0);
     },
   );
 

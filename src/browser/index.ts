@@ -965,15 +965,26 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       await emitRuntimeHint(true);
     }
 
-    if (config.url !== baseUrl && !alreadyAtPromptUrl) {
+    if (config.url !== baseUrl) {
       await raceWithDisconnect(
-        navigateToPromptReadyWithFallback(Page, Runtime, {
-          url: config.url,
-          fallbackUrl: baseUrl,
-          timeoutMs: config.inputTimeoutMs,
-          headless: config.headless,
-          logger,
-        }),
+        navigateToPromptReadyWithFallback(
+          Page,
+          Runtime,
+          {
+            url: config.url,
+            fallbackUrl: baseUrl,
+            timeoutMs: config.inputTimeoutMs,
+            headless: config.headless,
+            logger,
+          },
+          alreadyAtPromptUrl
+            ? {
+                navigateToChatGPT: async (page, runtime, url, log) => {
+                  if (url !== currentUrl) await navigateToChatGPT(page, runtime, url, log);
+                },
+              }
+            : undefined,
+        ),
       );
     } else {
       await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));

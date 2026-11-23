@@ -81,6 +81,7 @@ export async function startHumanCheckServer(
   let timer: ReturnType<typeof setTimeout>;
   let navigating = false;
   let revision = 0;
+  let lastObservation: string | undefined;
   async function connect() {
     if (!client) {
       const connected = await connectToCheckTarget(options);
@@ -113,7 +114,10 @@ export async function startHumanCheckServer(
 
   function observe(next: string) {
     if (state !== "watching") return;
-    revision += 1;
+    if (next !== lastObservation) {
+      lastObservation = next;
+      revision += 1;
+    }
     if (next !== "clear" || navigating) {
       cancelSettlement();
       return;
@@ -130,6 +134,13 @@ export async function startHumanCheckServer(
       confirmationTimer = setTimeout(() => void close(), 10_000);
     }, SETTLE_MS);
     settleTimer = candidate;
+  }
+
+  async function probe(c: Client) {
+    const observedAt = revision;
+    const next = await readCheckState(c, expression);
+    if (revision === observedAt) observe(next);
+    return next;
   }
 
   async function watchTab() {
@@ -153,18 +164,15 @@ export async function startHumanCheckServer(
     c.Page.frameNavigated(({ frame }) => {
       if (frame.parentId) return;
       mainFrame = frame.id;
-      navigating = true;
+      navigating = false;
       observe("loading");
+      void probe(c).catch(() => {});
     });
     c.Page.frameStoppedLoading(({ frameId }) => {
-      if (frameId !== mainFrame) return;
+      if (frameId !== mainFrame || !navigating) return;
+      // A navigation can end without committing a replacement document.
       navigating = false;
-      const stoppedAt = revision;
-      void readCheckState(c, expression)
-        .then((next) => {
-          if (revision === stoppedAt) observe(next);
-        })
-        .catch(() => {});
+      void probe(c).catch(() => {});
     });
     c.Runtime.bindingCalled(({ name, payload }) => {
       if (name === MONITOR_BINDING) observe(payload);
@@ -188,6 +196,8 @@ export async function startHumanCheckServer(
         document.addEventListener('DOMContentLoaded', observe);
         window.addEventListener('load', observe, true);
         window.addEventListener('resize', observe);
+        window.addEventListener('transitionend', observe, true);
+        window.addEventListener('animationend', observe, true);
         observe();
       })()`,
     });
@@ -267,7 +277,9 @@ export async function startHumanCheckServer(
       if (res.destroyed) return;
       // Check immediately before input, so a challenge that cleared meanwhile never receives a click.
       if (point) await c.Page.bringToFront();
-      if ((await readCheckState(c, expression)) !== "challenge" || state !== "watching") {
+      const checkedAt = revision;
+      const before = await probe(c);
+      if (before !== "challenge" || navigating || state !== "watching" || revision !== checkedAt) {
         res.writeHead(202).end();
         return;
       }
@@ -288,11 +300,8 @@ export async function startHumanCheckServer(
           const capturedAt = revision;
           const frame = await c.Page.captureScreenshot({ format: "jpeg", quality: 70 });
           // The challenge can redirect during capture; never forward a frame of the page behind it.
-          if (
-            (await readCheckState(c, expression)) !== "challenge" ||
-            revision !== capturedAt ||
-            state !== "watching"
-          ) {
+          const after = await probe(c);
+          if (after !== "challenge" || revision !== capturedAt || state !== "watching") {
             res.writeHead(202).end();
             return;
           }
@@ -318,7 +327,8 @@ export async function startHumanCheckServer(
         button: "left",
         clickCount: 1,
       });
-      if ((await readCheckState(c, expression)) !== "challenge") {
+      const after = await probe(c);
+      if (after !== "challenge") {
         res.writeHead(202).end();
         return;
       }

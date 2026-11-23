@@ -18,13 +18,20 @@ afterEach(async () => {
 
 function fakeChallenge() {
   const origin = "http://fixture.invalid";
+  let inlineChallenge = false;
+  let visible = true;
+  const iframe = {
+    getBoundingClientRect: () => ({ width: visible ? 100 : 0, height: 100 }),
+  };
   const document = {
     title: "Just a moment...",
     readyState: "complete",
-    querySelectorAll: () => [],
+    querySelectorAll: (selector: string) =>
+      inlineChallenge && selector.startsWith("iframe") ? [iframe] : [],
     addEventListener: () => {},
   };
   const location = { origin, href: origin };
+  const globals = { document, location, getComputedStyle: () => ({}) };
   let onMutation: () => void;
   let installObserver: () => void;
   let bindingName: string;
@@ -39,7 +46,7 @@ function fakeChallenge() {
         bindingName = name;
       },
       evaluate: async ({ expression }: { expression: string }) => ({
-        result: { value: runInNewContext(expression, { document, location }) },
+        result: { value: runInNewContext(expression, globals) },
       }),
     },
     Page: {
@@ -59,8 +66,7 @@ function fakeChallenge() {
             },
           };
           runInNewContext(source, {
-            document,
-            location,
+            ...globals,
             window,
             MutationObserver: class {
               constructor(callback: () => void) {
@@ -97,6 +103,20 @@ function fakeChallenge() {
       events.emit("navigating", { frame: { id: "main" } });
       installObserver();
       events.emit("loaded", { frameId: "main" });
+    },
+    commitInteractivePage: () => {
+      document.title = "Fixture app";
+      document.readyState = "interactive";
+      events.emit("navigating", { frame: { id: "main" } });
+      installObserver();
+    },
+    showInlineChallenge: () => {
+      document.title = "Fixture app";
+      inlineChallenge = true;
+      onMutation();
+    },
+    hideIframeWithoutMutation: () => {
+      visible = false;
     },
     disconnect: () => events.emit("disconnect"),
   };
@@ -185,6 +205,29 @@ test("keeps the same viewer through a follow-up navigation and wakes the waiter 
   expect(fixture.clicks()).toBe(2);
   expect(await waitForHumanCheck(url)).toBe(true);
   expect(await request(url, "/frame")).toEqual({ status: 204, body: "" });
+});
+
+test("settles an interactive replacement page with unrelated resources still loading", async () => {
+  const { fixture, url } = await startFixture();
+  const wait = openWait(url);
+  await wait.attached;
+  fixture.startNavigation();
+  fixture.commitInteractivePage();
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(await wait.response).toEqual({ status: 200, body: "cleared" });
+});
+
+test("lets a frame's fresh visibility check settle a hidden challenge iframe", async () => {
+  const { fixture, url } = await startFixture();
+  fixture.showInlineChallenge();
+  const wait = openWait(url);
+  await wait.attached;
+  expect((await request(url, "/frame")).status).toBe(200);
+  expect((await request(url, "/click", { method: "POST" })).status).toBe(200);
+  fixture.hideIframeWithoutMutation();
+  expect(await request(url, "/frame")).toEqual({ status: 202, body: "" });
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(await wait.response).toEqual({ status: 200, body: "cleared" });
 });
 
 test.each(["expired", "tab closed", "session moved on"])(
