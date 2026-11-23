@@ -81,8 +81,11 @@ export interface ReattachDeps {
   continuationState?: { used: boolean };
   listTargets?: () => Promise<TargetInfoLite[]>;
   connect?: (options?: unknown) => Promise<ChromeClient>;
-  chromeModeCb?: (mode: ReattachResult["chromeMode"]) => Promise<void> | void;
-  humanCheckRuntimeCb?: BrowserRunOptions["runtimeHintCb"];
+  chromeModeCb?: (
+    mode: ReattachResult["chromeMode"],
+    runtime?: BrowserRuntimeMetadata,
+  ) => Promise<void> | void;
+  humanCheck?: "handoff" | "resume";
   waitForAssistantResponse?: typeof waitForAssistantResponse;
   captureAssistantMarkdown?: typeof captureAssistantMarkdown;
   recoverSession?: (
@@ -233,7 +236,7 @@ export async function resumeBrowserSession(
     : null;
   let closeConnection: (() => Promise<void>) | null = null;
   let answeringQuestions = false;
-  let ownsConnectedTarget = false;
+  let humanCheckRuntime: BrowserRuntimeMetadata | undefined;
 
   try {
     const liveRuntime = await refreshAttachRuntime(runtime, logger).catch(() => runtime);
@@ -257,6 +260,12 @@ export async function resumeBrowserSession(
         })) as TargetInfoLite[]);
     const targetList = (await listTargets()) as TargetInfoLite[];
     const target = pickTarget(targetList, liveRuntime);
+    if (
+      deps.humanCheck === "resume" &&
+      (!liveRuntime.chromeTargetId || target?.targetId !== liveRuntime.chromeTargetId)
+    ) {
+      throw Error("Saved challenge tab is unavailable.");
+    }
     const connection =
       browserWSEndpoint && !deps.connect
         ? await connectToRemoteChromeTarget(host, port ?? 9222, logger, {
@@ -283,7 +292,7 @@ export async function resumeBrowserSession(
     closeConnection =
       browserWSEndpoint && !deps.connect ? connection.close : () => connection.client.close();
     const connectedTargetId = "targetId" in connection ? connection.targetId : target?.targetId;
-    ownsConnectedTarget = Boolean(
+    const ownsConnectedTarget = Boolean(
       !resolvedConfig.browserTabRef &&
       liveRuntime.chromeTargetId &&
       connectedTargetId === liveRuntime.chromeTargetId,
@@ -354,8 +363,8 @@ export async function resumeBrowserSession(
       pingTimeoutMs,
       "Reattach target did not respond",
     );
-    if (deps.humanCheckRuntimeCb && ownsConnectedTarget) {
-      await deps.humanCheckRuntimeCb({ ...liveRuntime, chromePort: port, chromeHost: host });
+    if (deps.humanCheck && ownsConnectedTarget) {
+      humanCheckRuntime = { ...liveRuntime, chromePort: port, chromeHost: host };
       await ensureNotBlocked(Runtime, resolvedConfig.headless, logger);
     }
     await ensureConversationOpen();
@@ -452,12 +461,16 @@ export async function resumeBrowserSession(
     await releaseReattachRunLease(reattachRunLease, logger);
     reattachRunLease = null;
     if (
+      humanCheckRuntime &&
+      error instanceof BrowserAutomationError &&
+      error.details?.stage === "cloudflare-challenge"
+    ) {
+      await deps.chromeModeCb?.("reused_devtools", humanCheckRuntime);
+      throw error;
+    }
+    if (
       error instanceof AssistantStoppedError ||
       error instanceof AssistantQuestionsError ||
-      (deps.humanCheckRuntimeCb &&
-        ownsConnectedTarget &&
-        error instanceof BrowserAutomationError &&
-        error.details?.stage === "cloudflare-challenge") ||
       answeringQuestions ||
       deps.questionAnswers?.submissionState.started
     )
@@ -643,19 +656,6 @@ async function resumeBrowserSessionViaNewChrome(
       await windowTransitionLock?.release();
     }
     if (!client) throw new Error("Failed to connect to managed Chrome.");
-    if (isolatedTargetId) {
-      await deps.humanCheckRuntimeCb?.({
-        ...runtime,
-        chromePort: chrome.port,
-        chromeHost,
-        chromePid: chrome.pid,
-        chromeTargetId: isolatedTargetId,
-        chromeBrowserWSEndpoint: undefined,
-        chromeProfileRoot: userDataDir,
-        userDataDir,
-        controllerPid: process.pid,
-      });
-    }
     const { Network, Page, Runtime, DOM } = client;
 
     if (Runtime?.enable) {
@@ -772,6 +772,25 @@ async function resumeBrowserSessionViaNewChrome(
       chromeMode: "relaunched",
       keepBrowserOpen: afterAnswerResult?.keepBrowserOpen,
     };
+  } catch (error) {
+    if (
+      isolatedTargetId &&
+      error instanceof BrowserAutomationError &&
+      error.details?.stage === "cloudflare-challenge"
+    ) {
+      await deps.chromeModeCb?.("relaunched", {
+        ...runtime,
+        chromePid: chrome.pid,
+        chromePort: chrome.port,
+        chromeHost,
+        chromeBrowserWSEndpoint: undefined,
+        chromeProfileRoot: undefined,
+        chromeTargetId: isolatedTargetId,
+        userDataDir,
+        controllerPid: process.pid,
+      });
+    }
+    throw error;
   } finally {
     await client?.close().catch(() => undefined);
     if (manualLogin && completed && !keepBrowserOpen && isolatedTargetId) {

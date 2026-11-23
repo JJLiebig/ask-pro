@@ -1002,6 +1002,39 @@ describe("ask-pro browser runner", () => {
         "AWAITING_ANSWERS",
       );
       expect(await readAskProQuestions(session.dir)).toEqual(request);
+      isHeadlessLinuxMock.mockReturnValueOnce(true).mockReturnValueOnce(true);
+      resumeBrowserSessionMock.mockRejectedValueOnce(
+        new BrowserAutomationError("Cloudflare challenge detected.", {
+          stage: "cloudflare-challenge",
+        }),
+      );
+      saveHumanCheckMock.mockResolvedValueOnce("http://fixture.invalid:1234/");
+      await expect(
+        resumeAskProBrowserSession({ cwd, sessionId: session.id, answers }),
+      ).rejects.toMatchObject({
+        reason: "challenge_detected",
+        checkUrl: "http://fixture.invalid:1234/",
+      });
+      expect((await readAskProStatus({ cwd, sessionId: session.id })).status).toMatchObject({
+        status: "AWAITING_ANSWERS",
+        reason: "challenge_detected",
+      });
+      expect(await readAskProQuestions(session.dir)).toEqual(request);
+      isHeadlessLinuxMock.mockReturnValueOnce(true);
+      resumeHumanCheckMock.mockImplementationOnce(async (_dir, target) => {
+        expect(target?.targetId).toBe("timeout-target");
+        return "clear";
+      });
+      resumeBrowserSessionMock.mockImplementationOnce(async (...args: unknown[]) => {
+        const deps = args[3] as ReattachDeps;
+        expect(deps.questionAnswers?.answers).toEqual([2]);
+        expect(deps.humanCheck).toBe("resume");
+        return {
+          answerText: "Answer after verification",
+          answerMarkdown: "# Answer",
+          chromeMode: "reused_devtools",
+        };
+      });
       await resumeAskProBrowserSession({ cwd, sessionId: session.id, answers });
       expect((await readAskProStatus({ cwd, sessionId: session.id })).status.status).toBe(
         "COMPLETED",
@@ -1137,7 +1170,7 @@ describe("ask-pro browser runner", () => {
       if (reopened) {
         resumeBrowserSessionMock.mockImplementationOnce(async (...args: unknown[]) => {
           const deps = args[3] as ReattachDeps;
-          await deps.humanCheckRuntimeCb!({
+          await deps.chromeModeCb!("relaunched", {
             chromePort: 9223,
             chromeTargetId: "recovered-tab",
             promptSubmitted: true,

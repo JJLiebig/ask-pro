@@ -104,6 +104,36 @@ describe("reattach browser lease", () => {
       {},
     );
   });
+  test("recovers a pending check on an owned tab after Chrome restores its URL under a new ID", async () => {
+    const conversationUrl = "https://chatgpt.com/c/saved-conversation";
+    const restoredTab = {
+      close: async () => {},
+      Input: {},
+      Runtime: {
+        evaluate: async ({ expression }: { expression: string }) => ({
+          result: { value: expression === "location.href" ? conversationUrl : 2 },
+        }),
+      },
+    } as unknown as ChromeClient;
+    const result = await resumeBrowserSession(
+      { chromePort: 9222, chromeTargetId: "original-tab", tabUrl: conversationUrl },
+      {},
+      vi.fn<(message: string) => void>(),
+      {
+        humanCheck: "resume",
+        listTargets: async () => [{ targetId: "restored-tab", type: "page", url: conversationUrl }],
+        connect: async () => restoredTab,
+        waitForAssistantResponse: async () => ({ text: "Response from restored tab", meta: {} }),
+        captureAssistantMarkdown: async () => null,
+        recoverSession: async () => ({
+          answerText: "Recovered response",
+          answerMarkdown: "Recovered response",
+          chromeMode: "relaunched",
+        }),
+      },
+    );
+    expect(result.answerText).toBe("Recovered response");
+  });
   test("does not treat ChatGPT's provisional WEB route as a saved conversation", () => {
     const provisional = "https://chatgpt.com/c/WEB:795d079e-6c4d-4334-b0ae-4534c70305bd";
     const saved = "https://chatgpt.com/c/795d079e-6c4d-4334-b0ae-4534c70305bd";

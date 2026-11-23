@@ -26,7 +26,9 @@ or your harness's background mode with no short timeout. Wait for that command's
 completion notification. The human opens the link and clicks the verification
 control, including any follow-up or refresh control shown. They do not need to
 tell you when it clears. If `resume` returns `needs_human_check` again, send the
-new link and start the emitted command again. Never open the real challenge,
+new link and start the emitted command again. If a check interrupts a reply to
+native questions, use the same answers with the emitted `resume` or `reply`
+command. Never open the real challenge,
 capture its frames, or automate its controls. The viewer closes after clearance,
 when the session moves on or the tab closes, or after 24 hours.
 `ASK_PRO_CHECK_HOST` overrides the link's
