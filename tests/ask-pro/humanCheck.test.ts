@@ -33,6 +33,8 @@ function fakeChallenge() {
   const location = { origin, href: origin };
   const globals = { document, location, getComputedStyle: () => ({}) };
   let onMutation: () => void;
+  let onResize: () => void;
+  const resizing = new Set<unknown>();
   let installObserver: () => void;
   let bindingName: string;
   let clicks = 0;
@@ -73,6 +75,21 @@ function fakeChallenge() {
                 onMutation = callback;
               }
               observe() {}
+            },
+            ResizeObserver: class {
+              constructor(callback: () => void) {
+                onResize = callback;
+              }
+              observe(element: unknown) {
+                resizing.add(element);
+              }
+              unobserve(element: unknown) {
+                resizing.delete(element);
+              }
+            },
+            IntersectionObserver: class {
+              observe() {}
+              unobserve() {}
             },
             [bindingName]: (payload: string) =>
               events.emit("binding", { name: bindingName, payload }),
@@ -117,6 +134,10 @@ function fakeChallenge() {
     },
     hideIframeWithoutMutation: () => {
       visible = false;
+    },
+    resizeIframe: () => {
+      visible = false;
+      if (resizing.has(iframe)) onResize();
     },
     disconnect: () => events.emit("disconnect"),
   };
@@ -226,6 +247,17 @@ test("lets a frame's fresh visibility check settle a hidden challenge iframe", a
   expect((await request(url, "/click", { method: "POST" })).status).toBe(200);
   fixture.hideIframeWithoutMutation();
   expect(await request(url, "/frame")).toEqual({ status: 202, body: "" });
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(await wait.response).toEqual({ status: 200, body: "cleared" });
+});
+
+test("settles an inline challenge that disappears after the phone sends its last click", async () => {
+  const { fixture, url } = await startFixture();
+  fixture.showInlineChallenge();
+  const wait = openWait(url);
+  await wait.attached;
+  expect((await request(url, "/click", { method: "POST" })).status).toBe(200);
+  fixture.resizeIframe();
   await vi.advanceTimersByTimeAsync(2_000);
   expect(await wait.response).toEqual({ status: 200, body: "cleared" });
 });

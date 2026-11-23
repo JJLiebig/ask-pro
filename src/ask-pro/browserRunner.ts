@@ -471,7 +471,6 @@ async function resumeAskProBrowserSessionWithLease({
       agentId: metadata.agentId ?? null,
       allowStartMinimized: false,
       verbose,
-      resumeTarget,
     });
     return;
   }

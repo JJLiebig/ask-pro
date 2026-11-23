@@ -29,6 +29,9 @@ const SETTLE_MS = 2_000;
 const CHATGPT_ORIGIN = "https://chatgpt.com";
 const MONITOR_WORLD = "ask-pro-human-check";
 const MONITOR_BINDING = "reportAskProHumanCheck";
+const CHALLENGE_FRAMES =
+  'iframe[src*="challenges.cloudflare.com"],iframe[src*="/challenge-platform/" i],iframe[src*="captcha" i]';
+const CHALLENGE_CONTAINERS = 'form,[role="dialog"]';
 type CheckState = "challenge" | "loading" | "clear";
 
 function checkStateExpression(origin: string) {
@@ -36,8 +39,8 @@ function checkStateExpression(origin: string) {
     if (location.origin === ${JSON.stringify(origin)}) {
       const visible = el => { const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden'; };
       if (document.title.toLowerCase().includes('just a moment')) return 'challenge';
-      if (Array.from(document.querySelectorAll('iframe[src*="challenges.cloudflare.com"],iframe[src*="/challenge-platform/" i],iframe[src*="captcha" i]')).some(visible)) return 'challenge';
-      if (Array.from(document.querySelectorAll('form,[role="dialog"]')).some(el => visible(el) && !el.querySelector('textarea,[contenteditable="true"]') && /\\b(security check|verify you are human|captcha)\\b/i.test(el.textContent || ''))) return 'challenge';
+      if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_FRAMES)})).some(visible)) return 'challenge';
+      if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_CONTAINERS)})).some(el => visible(el) && !el.querySelector('textarea,[contenteditable="true"]') && /\\b(security check|verify you are human|captcha)\\b/i.test(el.textContent || ''))) return 'challenge';
     }
     return document.readyState === 'loading' || location.href === 'about:blank' ? 'loading' : 'clear';
   })()`;
@@ -184,7 +187,24 @@ export async function startHumanCheckServer(
       source: `(() => {
         if (window !== window.top) return;
         let last;
+        let watched = new Set();
+        const size = new ResizeObserver(observe);
+        const visibility = new IntersectionObserver(observe, { trackVisibility: true, delay: 100 });
         function observe() {
+          const surfaces = location.origin === ${JSON.stringify(options.origin ?? CHATGPT_ORIGIN)}
+            ? new Set(document.querySelectorAll(${JSON.stringify(`${CHALLENGE_FRAMES},${CHALLENGE_CONTAINERS}`)}))
+            : new Set();
+          for (const el of watched) {
+            if (surfaces.has(el)) continue;
+            size.unobserve(el);
+            visibility.unobserve(el);
+          }
+          for (const el of surfaces) {
+            if (watched.has(el)) continue;
+            size.observe(el);
+            visibility.observe(el);
+          }
+          watched = surfaces;
           const next = ${expression};
           if (next === last) return;
           last = next;

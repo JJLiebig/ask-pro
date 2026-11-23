@@ -134,6 +134,60 @@ describe("reattach browser lease", () => {
     );
     expect(result.answerText).toBe("Recovered response");
   });
+  test.each(["saved conversation", "wrong conversation"])(
+    "checks the %s in the verified tab before sending native answers",
+    async (destination) => {
+      const conversationUrl = "https://chatgpt.com/c/saved-conversation";
+      let tabUrl = "https://chatgpt.com/";
+      let answered = false;
+      const questions = [{ question: "Color?", options: ["Blue"], freeText: true }];
+      const client = {
+        close: async () => {},
+        Input: {},
+        Page: {
+          navigate: async ({ url }: { url: string }) => {
+            expect(url).toBe(conversationUrl);
+            tabUrl = destination === "saved conversation" ? url : "https://chatgpt.com/c/other";
+          },
+        },
+        Runtime: {
+          evaluate: async ({ expression }: { expression: string }) => {
+            let value: unknown = false;
+            if (expression === "location.href") value = tabUrl;
+            if (expression === "document.readyState") value = "interactive";
+            if (expression.includes("const submission =")) {
+              answered = true;
+              value = { questions, started: true };
+            }
+            return { result: { value } };
+          },
+        },
+      } as unknown as ChromeClient;
+      const resume = resumeBrowserSession(
+        { chromePort: 9222, chromeTargetId: "verified-tab", tabUrl: conversationUrl },
+        {},
+        vi.fn<(message: string) => void>(),
+        {
+          humanCheck: "resume",
+          listTargets: async () => [{ targetId: "verified-tab", type: "page", url: tabUrl }],
+          connect: async () => client,
+          questionAnswers: { answers: [1], questions, submissionState: { started: false } },
+          waitForAssistantResponse: async () => ({ text: "Fresh answer: Blue", meta: {} }),
+          captureAssistantMarkdown: async () => null,
+          recoverSession: async () => {
+            throw Error("Could not recover the conversation.");
+          },
+        },
+      );
+      if (destination === "saved conversation") {
+        expect((await resume).answerText).toBe("Fresh answer: Blue");
+        expect(answered).toBe(true);
+      } else {
+        await expect(resume).rejects.toThrow("Could not recover the conversation.");
+        expect(answered).toBe(false);
+      }
+    },
+  );
   test("does not treat ChatGPT's provisional WEB route as a saved conversation", () => {
     const provisional = "https://chatgpt.com/c/WEB:795d079e-6c4d-4334-b0ae-4534c70305bd";
     const saved = "https://chatgpt.com/c/795d079e-6c4d-4334-b0ae-4534c70305bd";

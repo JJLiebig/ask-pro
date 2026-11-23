@@ -198,6 +198,25 @@ async function closeManagedChromeIfUnused(
   );
 }
 
+function savedConversationId(runtime: BrowserRuntimeMetadata) {
+  return runtime.conversationId ?? extractConversationIdFromUrl(runtime.tabUrl ?? "");
+}
+
+async function readTabUrl(Runtime: ChromeClient["Runtime"]) {
+  const { result } = await Runtime.evaluate({ expression: "location.href", returnByValue: true });
+  return typeof result.value === "string" ? result.value : "";
+}
+
+async function verifyAnswerConversation(
+  Runtime: ChromeClient["Runtime"],
+  runtime: BrowserRuntimeMetadata,
+) {
+  const expectedId = savedConversationId(runtime);
+  if (expectedId && extractConversationIdFromUrl(await readTabUrl(Runtime)) !== expectedId) {
+    throw new Error("Unable to open the saved ChatGPT conversation for these answers.");
+  }
+}
+
 export async function resumeBrowserSession(
   runtime: BrowserRuntimeMetadata,
   config: BrowserSessionConfig | undefined,
@@ -327,22 +346,28 @@ export async function resumeBrowserSession(
     }
 
     const ensureConversationOpen = async () => {
-      const { result } = await Runtime.evaluate({
-        expression: "location.href",
-        returnByValue: true,
-      });
-      const href = typeof result?.value === "string" ? result.value : "";
-      if (href.includes("/c/")) {
-        const currentId = extractConversationIdFromUrl(href);
-        if (!runtime.conversationId || (currentId && currentId === runtime.conversationId)) {
+      const href = await readTabUrl(Runtime);
+      const expectedId = savedConversationId(runtime);
+      if (
+        href.includes("/c/") &&
+        (!expectedId || extractConversationIdFromUrl(href) === expectedId)
+      ) {
+        return;
+      }
+      if (deps.humanCheck === "resume") {
+        const url =
+          buildConversationUrl(runtime, resolvedConfig.url) ??
+          buildConversationUrl({ conversationId: expectedId }, resolvedConfig.url);
+        if (url) {
+          await navigateToChatGPT(Page, Runtime, url, logger);
+          await ensureNotBlocked(Runtime, resolvedConfig.headless, logger);
           return;
         }
       }
       const opened = await openConversationFromSidebarWithRetry(
         Runtime,
         {
-          conversationId:
-            runtime.conversationId ?? extractConversationIdFromUrl(runtime.tabUrl ?? ""),
+          conversationId: expectedId,
           preferProjects: true,
           promptPreview: deps.promptPreview,
         },
@@ -370,6 +395,7 @@ export async function resumeBrowserSession(
     await ensureConversationOpen();
     let minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     if (deps.questionAnswers) {
+      if (deps.humanCheck) await verifyAnswerConversation(Runtime, runtime);
       answeringQuestions = true;
       const replyBoundary = await answerAssistantQuestions(
         Runtime,
@@ -724,6 +750,7 @@ async function resumeBrowserSessionViaNewChrome(
     const timeoutMs = resolved.timeoutMs ?? 120_000;
     let minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     if (deps.questionAnswers) {
+      if (deps.humanCheck) await verifyAnswerConversation(Runtime, runtime);
       const replyBoundary = await answerAssistantQuestions(
         Runtime,
         client.Input,
