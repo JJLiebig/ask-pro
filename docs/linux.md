@@ -91,11 +91,14 @@ state folder. Do not copy an entire Windows browser profile to Linux.
 ## Human checks on a headless server
 
 When a query encounters a Cloudflare challenge, ask-pro leaves Chrome open and
-returns `state: needs_human_check`, a `check_url`, and a `resume` command.
-Your agent sends you the private check link and immediately starts the printed
-resume command in the background. Open the link, click the Cloudflare verification
-control, and complete any further verification or use the refresh control if one
-is shown. Once the checks clear, the run continues automatically.
+returns `state: needs_human_check` and a `check_url`. Your agent sends you the
+private check link and starts the printed `resume` command in the background
+when one is provided. If a verification check interrupts an answer
+from stdin and ask-pro prints a `reply` command, your agent saves those same
+answers in a JSON file and runs the printed command in the background.
+Open the link, click the Cloudflare verification control, and complete any
+further verification or use the refresh control if one is shown. Once the checks
+clear, the run continues automatically.
 
 The viewer binds `0.0.0.0`; its link uses the server hostname by default. If that
 name is not reachable from your devices, set `ASK_PRO_CHECK_HOST` to its Tailscale

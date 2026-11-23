@@ -980,7 +980,11 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           alreadyAtPromptUrl
             ? {
                 navigateToChatGPT: async (page, runtime, url, log) => {
-                  if (url !== currentUrl) await navigateToChatGPT(page, runtime, url, log);
+                  const { result } = await runtime.evaluate({
+                    expression: "location.href",
+                    returnByValue: true,
+                  });
+                  if (url !== result.value) await navigateToChatGPT(page, runtime, url, log);
                 },
               }
             : undefined,

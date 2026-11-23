@@ -10,6 +10,7 @@ import CDP from "chrome-remote-interface";
 import { startHumanCheckServer, waitForHumanCheck } from "../dist/src/ask-pro/humanCheck.js";
 import { launchChrome, closeChromeGracefully } from "../dist/src/browser/chromeLifecycle.js";
 import { resolveBrowserConfig } from "../dist/src/browser/config.js";
+import { withTimeout } from "../dist/src/browser/reattachHelpers.js";
 const root = await fs.mkdtemp(path.join(os.tmpdir(), "ask-pro-check-smoke-"));
 process.env.ASK_PRO_STATE_DIR = root;
 const fixture = http.createServer((_req, res) =>
@@ -21,18 +22,25 @@ await new Promise((resolve) => fixture.listen(0, "127.0.0.1", resolve));
 const origin = "http://127.0.0.1:" + fixture.address().port;
 let chrome, relay, page, viewer;
 const frameReady = 'document.querySelector("#screen:not([hidden])")?.naturalWidth > 0';
+const waitForFixture = (promise, step) =>
+  withTimeout(promise, 10_000, `Fixture timed out waiting for ${step}`);
 async function openPage(port, url) {
   const target = await CDP.New({ port, url: "about:blank" });
   const client = await CDP({ port, target: target.id });
-  await client.Page.enable();
-  const loaded = client.Page.loadEventFired();
-  await client.Page.navigate({ url });
-  await loaded;
-  return { target, client };
+  try {
+    await client.Page.enable();
+    const loaded = client.Page.loadEventFired();
+    await waitForFixture(Promise.all([client.Page.navigate({ url }), loaded]), "page load");
+    return { target, client };
+  } catch (error) {
+    await client.close().catch(() => {});
+    throw error;
+  }
 }
 async function waitForDocument(client, expression) {
-  const result = await client.Runtime.evaluate({
-    expression: `new Promise(resolve => {
+  const result = await waitForFixture(
+    client.Runtime.evaluate({
+      expression: `new Promise(resolve => {
       const observer = new MutationObserver(check);
       function check() {
         if (!(${expression})) return;
@@ -44,15 +52,16 @@ async function waitForDocument(client, expression) {
       document.addEventListener('load', check, true);
       check();
     })`,
-    awaitPromise: true,
-    returnByValue: true,
-  });
+      awaitPromise: true,
+      returnByValue: true,
+    }),
+    "viewer readiness",
+  );
   assert.equal(result.result.value, true);
 }
 async function reload(client) {
   const loaded = client.Page.loadEventFired();
-  await client.Page.reload();
-  await loaded;
+  await waitForFixture(Promise.all([client.Page.reload(), loaded]), "page reload");
 }
 try {
   chrome = await launchChrome(
@@ -110,7 +119,7 @@ try {
   await viewer.Runtime.evaluate({
     expression: `(()=>{const img=document.querySelector('#screen'),r=img.getBoundingClientRect();img.dispatchEvent(new MouseEvent('click',{clientX:r.x+${point.x}*r.width/img.naturalWidth,clientY:r.y+${point.y}*r.height/img.naturalHeight}));})()`,
   });
-  assert.equal(await resumed, true);
+  assert.equal(await waitForFixture(resumed, "automatic resume"), true);
   await waitForDocument(viewer, '!document.querySelector("#screen")');
   assert.equal(
     (await page.Runtime.evaluate({ expression: "document.title" })).result.value,

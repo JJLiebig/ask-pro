@@ -10,6 +10,7 @@ import { AssistantStoppedError } from "../../src/browser/errors.js";
 import {
   answerAssistantQuestions,
   buildQuestionCardsExpression,
+  waitForQuestionCard,
 } from "../../src/browser/actions/questions.js";
 import { submitPrompt } from "../../src/browser/actions/promptComposer.js";
 import type { BrowserLogger, ChromeClient } from "../../src/browser/types.js";
@@ -25,6 +26,53 @@ afterEach(() => {
 });
 
 describe("assistant response actions", () => {
+  test.each([true, false])("waits for a restored native card with renders=%s", async (renders) => {
+    vi.useFakeTimers();
+    let displayed = false;
+    let settled = false;
+    let onMutation!: () => void;
+    const document = {
+      querySelectorAll: () =>
+        displayed
+          ? [
+              {
+                getBoundingClientRect: () => ({ width: 200, height: 100 }),
+                closest: () => null,
+              },
+            ]
+          : [],
+    };
+    const MutationObserver = class {
+      constructor(callback: () => void) {
+        onMutation = callback;
+      }
+      observe() {}
+      disconnect() {}
+    };
+    const runtime = {
+      evaluate: async ({ expression }: { expression: string }) => ({
+        result: {
+          value: await new Function("document", "MutationObserver", `return ${expression}`)(
+            document,
+            MutationObserver,
+          ),
+        },
+      }),
+    } as unknown as ChromeClient["Runtime"];
+    const ready = waitForQuestionCard(runtime).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(settled).toBe(false);
+    if (renders) {
+      displayed = true;
+      onMutation();
+    } else {
+      await vi.advanceTimersByTimeAsync(4_000);
+    }
+    await ready;
+    expect(settled).toBe(true);
+  });
   test("captures native search-unit replies outside the legacy main thread", () => {
     class Element {
       content: Element | null = null;

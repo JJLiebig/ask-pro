@@ -22,9 +22,11 @@ function fakeChallenge() {
   let dialogChallenge: "dialog" | "nested form" | undefined;
   let visible = true;
   let followUpVisible = false;
+  let iframeX = 0;
+  let controlX = 0;
   let source = "http://fixture.invalid/captcha-one";
   const iframe = {
-    getBoundingClientRect: () => ({ width: visible ? 100 : 0, height: 100 }),
+    getBoundingClientRect: () => ({ x: iframeX, y: 0, width: visible ? 100 : 0, height: 100 }),
     getAttribute: () => source,
     matches: () => true,
   };
@@ -39,6 +41,11 @@ function fakeChallenge() {
     textContent: "Verify you are human",
   };
   const nestedForm = { ...dialog, textContent: "" };
+  const createControl = () => ({
+    getBoundingClientRect: () => ({ x: controlX, y: 0, width: 20, height: 20 }),
+    getAttribute: () => null,
+  });
+  let control = createControl();
   const document = {
     title: "Just a moment...",
     readyState: "complete",
@@ -46,12 +53,13 @@ function fakeChallenge() {
       ...(inlineChallenge && selector.includes("iframe") ? [iframe, followUp] : []),
       ...(dialogChallenge && selector.includes("form") ? [dialog] : []),
       ...(dialogChallenge === "nested form" && selector.includes("form") ? [nestedForm] : []),
+      ...(selector.includes("input,button") ? [control] : []),
     ],
     addEventListener: () => {},
   };
   const location = { origin, href: origin };
   const globals = { document, location, getComputedStyle: () => ({}) };
-  let onMutation: (records?: unknown[]) => void;
+  let onMutation: () => void;
   let onResize: () => void;
   let onLoad: (event: { type: string; target: typeof iframe }) => void;
   const resizing = new Set<unknown>();
@@ -63,6 +71,7 @@ function fakeChallenge() {
     events.emit("Page.frameNavigated", { frame: { id: "child" } }, "child-session");
   };
   let childNavigationQueued = false;
+  let rejectNextProbe = false;
   const evaluate = async ({ expression }: { expression: string }) => ({
     result: { value: runInNewContext(expression, globals) },
   });
@@ -80,6 +89,10 @@ function fakeChallenge() {
         bindingName = name;
       },
       evaluate: async (params: { expression: string }) => {
+        if (rejectNextProbe) {
+          rejectNextProbe = false;
+          throw Error("Fixture DevTools evaluation was interrupted.");
+        }
         if (childNavigationQueued) {
           childNavigationQueued = false;
           commitChildNavigation();
@@ -178,18 +191,21 @@ function fakeChallenge() {
       dialogChallenge = container;
       onMutation();
     },
-    replaceControl: () =>
-      onMutation([
-        {
-          type: "childList",
-          target: {
-            closest: () =>
-              dialogChallenge === "nested form" ? nestedForm : dialogChallenge ? dialog : null,
-          },
-          addedNodes: [{ matches: (selector: string) => selector.includes("input") }],
-          removedNodes: [],
-        },
-      ]),
+    replaceControl: () => {
+      control = createControl();
+      onMutation();
+    },
+    moveControl: () => {
+      controlX += 20;
+      onMutation();
+    },
+    moveIframe: () => {
+      iframeX += 20;
+      onMutation();
+    },
+    failNextMonitorProbe: () => {
+      rejectNextProbe = true;
+    },
     replaceInlineChallenge: () => {
       source = "http://fixture.invalid/captcha-two";
       onMutation();
@@ -325,6 +341,17 @@ test("settles an interactive replacement page with unrelated resources still loa
   expect(await wait.response).toEqual({ status: 200, body: "cleared" });
 });
 
+test("rechecks clearance once when the confirmation probe is interrupted", async () => {
+  const { fixture, url } = await startFixture();
+  const wait = openWait(url);
+  await wait.attached;
+  const initial = await request(url, "/frame");
+  expect((await click(url, initial.revision)).status).toBe(202);
+  fixture.failNextMonitorProbe();
+  await vi.advanceTimersByTimeAsync(4_000);
+  expect(await wait.response).toEqual({ status: 200, body: "cleared" });
+});
+
 test("lets a frame's fresh visibility check settle a hidden challenge iframe", async () => {
   const { fixture, url } = await startFixture();
   fixture.showInlineChallenge();
@@ -346,6 +373,7 @@ test("settles an inline challenge that disappears after the phone sends its last
   await wait.attached;
   for (const replace of [
     fixture.replaceInlineChallenge,
+    fixture.moveIframe,
     fixture.commitChildNavigation,
     fixture.queueChildNavigation,
     fixture.reloadInlineChallenge,
@@ -373,6 +401,9 @@ test.each(["dialog", "nested form", "title-only"] as const)(
     expect(first.status).toBe(200);
     fixture.replaceControl();
     expect((await click(url, first.revision)).status).toBe(202);
+    const replaced = await request(url, "/frame");
+    fixture.moveControl();
+    expect((await click(url, replaced.revision)).status).toBe(202);
     expect(fixture.clicks()).toBe(0);
     const current = await request(url, "/frame");
     expect(current.status).toBe(200);
@@ -400,3 +431,34 @@ test.each(["expired", "tab closed", "session moved on"])(
     expect(await waitForHumanCheck(url)).toBe(false);
   },
 );
+
+test("closes a monitor connection that arrives after the viewer expires", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  type Client = Awaited<ReturnType<typeof CDP>>;
+  let connect!: (client: Client) => void;
+  const connection = new Promise<Client>((resolve) => {
+    connect = resolve;
+  });
+  let markConnecting!: () => void;
+  const connecting = new Promise<void>((resolve) => {
+    markConnecting = resolve;
+  });
+  const close = vi.fn(async () => {});
+  vi.mocked(CDP).mockImplementation(() => {
+    markConnecting();
+    return connection;
+  });
+  const startup = startHumanCheckServer({
+    chromePort: 1,
+    targetId: "fixture",
+    host: "127.0.0.1",
+    bind: "127.0.0.1",
+    ttlMs: 100,
+  });
+  const unavailable = expect(startup).rejects.toThrow("Check unavailable");
+  await connecting;
+  await vi.advanceTimersByTimeAsync(100);
+  connect({ close } as unknown as Client);
+  await unavailable;
+  expect(close).toHaveBeenCalledOnce();
+});

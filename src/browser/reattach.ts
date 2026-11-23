@@ -2,6 +2,7 @@ import { AssistantStoppedError, BrowserAutomationError } from "./errors.js";
 import {
   AssistantQuestionsError,
   answerAssistantQuestions,
+  waitForQuestionCard,
   type AssistantQuestion,
 } from "./actions/questions.js";
 import { createAssistantContinuation } from "./actions/assistantResponse.js";
@@ -361,6 +362,10 @@ export async function resumeBrowserSession(
         if (url) {
           await navigateToChatGPT(Page, Runtime, url, logger);
           await ensureNotBlocked(Runtime, resolvedConfig.headless, logger);
+          if (deps.questionAnswers) {
+            await verifySavedConversation(Runtime, runtime);
+            await waitForQuestionCard(Runtime);
+          }
           return;
         }
       }

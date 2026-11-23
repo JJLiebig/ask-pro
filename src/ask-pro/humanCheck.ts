@@ -32,9 +32,10 @@ const MONITOR_BINDING = "reportAskProHumanCheck";
 const CHALLENGE_FRAMES =
   'iframe[src*="challenges.cloudflare.com"],iframe[src*="/challenge-platform/" i],iframe[src*="captcha" i]';
 const CHALLENGE_CONTAINERS = 'form,[role="dialog"]';
-const VISIBLE_SURFACE = `el => {
+const SURFACE_BOUNDS = `el => {
   const r = el.getBoundingClientRect(), s = getComputedStyle(el);
-  return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+  return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden'
+    ? [r.x, r.y, r.width, r.height] : null;
 }`;
 const CHALLENGE_PROMPT = `el => !el.querySelector('textarea,[contenteditable="true"]') &&
   /\\b(security check|verify you are human|captcha)\\b/i.test(el.textContent || '')`;
@@ -46,11 +47,11 @@ type CheckClick = { x: number; y: number; revision: number };
 function checkStateExpression(origin: string) {
   return `(() => {
     if (location.origin === ${JSON.stringify(origin)}) {
-      const visible = ${VISIBLE_SURFACE};
+      const bounds = ${SURFACE_BOUNDS};
       const hasPrompt = ${CHALLENGE_PROMPT};
       if (document.title.toLowerCase().includes('just a moment')) return 'challenge';
-      if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_FRAMES)})).some(visible)) return 'challenge';
-      if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_CONTAINERS)})).some(el => visible(el) && hasPrompt(el))) return 'challenge';
+      if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_FRAMES)})).some(bounds)) return 'challenge';
+      if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_CONTAINERS)})).some(el => bounds(el) && hasPrompt(el))) return 'challenge';
     }
     return document.readyState === 'loading' || location.href === 'about:blank' ? 'loading' : 'clear';
   })()`;
@@ -127,7 +128,7 @@ export async function startHumanCheckServer(
     finish();
   }
 
-  function observe(next: string) {
+  function observe(next: string, retryProbe = true) {
     if (state !== "watching") return;
     if (next !== lastObservation) {
       lastObservation = next;
@@ -139,9 +140,13 @@ export async function startHumanCheckServer(
     }
     if (settleTimer) return;
     const candidate = setTimeout(async () => {
-      const final = await readCheckState(monitor!, expression).catch(() => "loading");
+      const final = await readCheckState(monitor!, expression).catch(() => null);
       if (settleTimer !== candidate) return;
       settleTimer = undefined;
+      if (final === null && retryProbe) {
+        observe("clear", false);
+        return;
+      }
       if (final !== "clear") return;
       state = "cleared";
       for (const waiter of waiters) waiter.end("cleared");
@@ -160,6 +165,10 @@ export async function startHumanCheckServer(
 
   async function watchTab() {
     const c = await connectToCheckTarget(options);
+    if (state === "closed") {
+      await c.close();
+      throw Error("Check unavailable");
+    }
     function invalidateFrame() {
       revision += 1;
     }
@@ -232,23 +241,21 @@ export async function startHumanCheckServer(
         if (window !== window.top) return;
         let last;
         let watched = new Map();
-        const visible = ${VISIBLE_SURFACE};
-        const controls = ${JSON.stringify(CHALLENGE_CONTROLS)};
+        const bounds = ${SURFACE_BOUNDS};
         const size = new ResizeObserver(observe);
         const visibility = new IntersectionObserver(observe, { trackVisibility: true, delay: 100 });
         function observe(event) {
-          const surfaces = location.origin === ${JSON.stringify(options.origin ?? CHATGPT_ORIGIN)}
-            ? new Map(Array.from(document.querySelectorAll(${JSON.stringify(`${CHALLENGE_FRAMES},${CHALLENGE_CONTAINERS}`)}),
-                el => [el, JSON.stringify([el.getAttribute('src'), visible(el)])]))
-            : new Map();
+          const next = ${expression};
+          const selector = next === 'challenge'
+            ? ${JSON.stringify(`${CHALLENGE_FRAMES},${CHALLENGE_CONTAINERS},${CHALLENGE_CONTROLS}`)}
+            : ${JSON.stringify(`${CHALLENGE_FRAMES},${CHALLENGE_CONTAINERS}`)};
+          const elements = location.origin === ${JSON.stringify(options.origin ?? CHATGPT_ORIGIN)}
+            ? document.querySelectorAll(selector) : [];
+          const surfaces = new Map(Array.from(elements,
+            el => [el, JSON.stringify([el.getAttribute('src'), bounds(el)])]));
           const reloaded = event?.type === 'load' && surfaces.has(event.target) &&
             event.target.matches(${JSON.stringify(CHALLENGE_FRAMES)});
-          const replacedControl = Array.isArray(event) && event.some(record => {
-            if (record.type !== 'childList') return false;
-            return [...record.addedNodes, ...record.removedNodes].some(node =>
-              node.matches?.(controls) || node.querySelector?.(controls));
-          });
-          let changed = reloaded || replacedControl || surfaces.size !== watched.size;
+          let changed = reloaded || surfaces.size !== watched.size;
           for (const el of watched.keys()) {
             if (surfaces.has(el)) continue;
             size.unobserve(el);
@@ -261,7 +268,6 @@ export async function startHumanCheckServer(
             visibility.observe(el);
           }
           watched = surfaces;
-          const next = ${expression};
           if (next === 'challenge' && last === next && changed) {
             ${MONITOR_BINDING}('challenge-changed');
           }
@@ -275,6 +281,7 @@ export async function startHumanCheckServer(
         document.addEventListener('DOMContentLoaded', observe);
         window.addEventListener('load', observe, true);
         window.addEventListener('resize', observe);
+        window.addEventListener('scroll', observe, true);
         window.addEventListener('transitionend', observe, true);
         window.addEventListener('animationend', observe, true);
         observe();

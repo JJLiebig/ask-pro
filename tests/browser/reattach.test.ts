@@ -301,6 +301,7 @@ describe("reattach browser lease", () => {
     const conversationUrl = "https://chatgpt.com/c/saved-conversation";
     let tabUrl = "https://chatgpt.com/";
     let answered = false;
+    let waitedForQuestionCard = false;
     let waitedForResponse = false;
     const questions = [{ question: "Color?", options: ["Blue"], freeText: true }];
     const client = {
@@ -317,7 +318,9 @@ describe("reattach browser lease", () => {
           let value: unknown = false;
           if (expression === "location.href") value = tabUrl;
           if (expression === "document.readyState") value = "interactive";
+          if (expression.includes("new MutationObserver")) waitedForQuestionCard = true;
           if (expression.includes("const submission =")) {
+            expect(waitedForQuestionCard).toBe(true);
             answered = true;
             value = { questions, started: true };
           }
@@ -351,6 +354,7 @@ describe("reattach browser lease", () => {
       expect(answered).toBe(true);
     } else {
       await expect(resume).rejects.toThrow("Could not recover the conversation.");
+      expect(waitedForQuestionCard).toBe(false);
       expect(answered).toBe(false);
       expect(waitedForResponse).toBe(false);
     }
