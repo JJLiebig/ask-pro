@@ -5,7 +5,13 @@ import {
   runSubmissionWithRecoveryForTest,
   shouldPreserveBrowserOnErrorForTest,
 } from "../../src/browser/index.js";
-import { ensureLoggedIn, ensureNotBlocked } from "../../src/browser/pageActions.js";
+import {
+  ensureLoggedIn,
+  ensureNotBlocked,
+  ensurePromptReady,
+  navigateToChatGPT,
+  navigateToPromptReadyWithFallback,
+} from "../../src/browser/pageActions.js";
 import { BrowserAutomationError } from "../../src/browser/errors.js";
 
 describe("shouldPreserveBrowserOnErrorForTest", () => {
@@ -404,6 +410,74 @@ describe("navigation challenge detection", () => {
       await expect(result).resolves.toBeUndefined();
     }
   });
+
+  test.each([false, true])(
+    "reports a challenge after login and the full composer wait (temporary chat: %s)",
+    async (temporary) => {
+      vi.useFakeTimers();
+      try {
+        const baseUrl = "https://chatgpt.com/";
+        const url = temporary ? `${baseUrl}?temporary-chat=true` : baseUrl;
+        const timeoutMs = 1_000;
+        const document = {
+          readyState: "complete",
+          title: "ChatGPT",
+          body: null,
+          querySelector: () => null,
+          querySelectorAll: () => [],
+        };
+        const location = { href: "about:blank", pathname: "/" };
+        const Page = {
+          navigate: async ({ url }: { url: string }) => {
+            document.title = "ChatGPT";
+            location.href = url;
+          },
+        } as never;
+        const Runtime = {
+          evaluate: async ({ expression }: { expression: string }) => ({
+            result: {
+              value: await new Function("document", "location", "fetch", `return ${expression}`)(
+                document,
+                location,
+                async () => ({ status: 200 }),
+              ),
+            },
+          }),
+        } as never;
+        const logger = () => {};
+
+        await navigateToChatGPT(Page, Runtime, baseUrl, logger);
+        await ensureNotBlocked(Runtime, false, logger);
+        await ensureLoggedIn(Runtime, logger);
+        const ready = temporary
+          ? navigateToPromptReadyWithFallback(Page, Runtime, {
+              url,
+              fallbackUrl: baseUrl,
+              timeoutMs,
+              fallbackTimeoutMs: timeoutMs,
+              headless: false,
+              logger,
+            })
+          : ensurePromptReady(Runtime, timeoutMs, logger);
+        const outcome = ready.catch((error: unknown) => error);
+
+        setTimeout(() => {
+          document.title = "Just a moment...";
+        }, 200);
+        await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+        const waiting = Symbol("waiting");
+        expect(await Promise.race([outcome, Promise.resolve(waiting)])).toBe(waiting);
+        await vi.runAllTimersAsync();
+
+        const error = await outcome;
+        expect(error).toBeInstanceOf(BrowserAutomationError);
+        expect(error).toMatchObject({ details: { stage: "cloudflare-challenge" } });
+        expect(location.href).toBe(url);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 });
 
 describe("human intervention detection", () => {
