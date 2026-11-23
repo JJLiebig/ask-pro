@@ -19,6 +19,7 @@ afterEach(async () => {
 function fakeChallenge() {
   const origin = "http://fixture.invalid";
   let inlineChallenge = false;
+  let dialogChallenge = false;
   let visible = true;
   let followUpVisible = false;
   let source = "http://fixture.invalid/captcha-one";
@@ -31,16 +32,24 @@ function fakeChallenge() {
     getBoundingClientRect: () => ({ width: followUpVisible ? 100 : 0, height: 100 }),
     getAttribute: () => "http://fixture.invalid/captcha-follow-up",
   };
+  const dialog = {
+    getBoundingClientRect: () => ({ width: 200, height: 100 }),
+    getAttribute: () => null,
+    querySelector: () => null,
+    textContent: "Verify you are human",
+  };
   const document = {
     title: "Just a moment...",
     readyState: "complete",
-    querySelectorAll: (selector: string) =>
-      inlineChallenge && selector.startsWith("iframe") ? [iframe, followUp] : [],
+    querySelectorAll: (selector: string) => [
+      ...(inlineChallenge && selector.includes("iframe") ? [iframe, followUp] : []),
+      ...(dialogChallenge && selector.includes("form") ? [dialog] : []),
+    ],
     addEventListener: () => {},
   };
   const location = { origin, href: origin };
   const globals = { document, location, getComputedStyle: () => ({}) };
-  let onMutation: () => void;
+  let onMutation: (records?: unknown[]) => void;
   let onResize: () => void;
   let onLoad: (event: { type: string; target: typeof iframe }) => void;
   const resizing = new Set<unknown>();
@@ -48,6 +57,13 @@ function fakeChallenge() {
   let bindingName: string;
   let clicks = 0;
   const events = new EventEmitter();
+  const commitChildNavigation = () => {
+    events.emit("Page.frameNavigated", { frame: { id: "child" } }, "child-session");
+  };
+  let childNavigationQueued = false;
+  const evaluate = async ({ expression }: { expression: string }) => ({
+    result: { value: runInNewContext(expression, globals) },
+  });
   const client = Object.assign(events, {
     close: async () => {},
     send: async () => {},
@@ -61,9 +77,13 @@ function fakeChallenge() {
       addBinding: async ({ name }: { name: string }) => {
         bindingName = name;
       },
-      evaluate: async ({ expression }: { expression: string }) => ({
-        result: { value: runInNewContext(expression, globals) },
-      }),
+      evaluate: async (params: { expression: string }) => {
+        if (childNavigationQueued) {
+          childNavigationQueued = false;
+          commitChildNavigation();
+        }
+        return evaluate(params);
+      },
     },
     Page: {
       enable: async () => {},
@@ -82,7 +102,7 @@ function fakeChallenge() {
             ...globals,
             window,
             MutationObserver: class {
-              constructor(callback: () => void) {
+              constructor(callback: typeof onMutation) {
                 onMutation = callback;
               }
               observe() {}
@@ -121,7 +141,15 @@ function fakeChallenge() {
       },
     },
   });
-  vi.mocked(CDP).mockResolvedValue(client as never);
+  const capture = Object.assign(new EventEmitter(), {
+    close: async () => {},
+    Runtime: { evaluate },
+    Page: client.Page,
+    Input: client.Input,
+  });
+  vi.mocked(CDP)
+    .mockResolvedValue(capture as never)
+    .mockResolvedValueOnce(client as never);
   return {
     origin,
     clicks: () => clicks,
@@ -143,13 +171,28 @@ function fakeChallenge() {
       inlineChallenge = true;
       onMutation();
     },
+    showDialogChallenge: () => {
+      document.title = "Fixture app";
+      dialogChallenge = true;
+      onMutation();
+    },
+    replaceDialogControl: () =>
+      onMutation([
+        {
+          type: "childList",
+          target: { closest: () => dialog },
+          addedNodes: [{ matches: (selector: string) => selector.includes("input") }],
+          removedNodes: [],
+        },
+      ]),
     replaceInlineChallenge: () => {
       source = "http://fixture.invalid/captcha-two";
       onMutation();
     },
     reloadInlineChallenge: () => onLoad({ type: "load", target: iframe }),
-    commitChildNavigation: () => {
-      events.emit("Page.frameNavigated", { frame: { id: "child" } }, "child-session");
+    commitChildNavigation,
+    queueChildNavigation: () => {
+      childNavigationQueued = true;
     },
     switchVisibleChallenge: () => {
       visible = false;
@@ -299,6 +342,7 @@ test("settles an inline challenge that disappears after the phone sends its last
   for (const replace of [
     fixture.replaceInlineChallenge,
     fixture.commitChildNavigation,
+    fixture.queueChildNavigation,
     fixture.reloadInlineChallenge,
     fixture.switchVisibleChallenge,
   ]) {
@@ -313,6 +357,19 @@ test("settles an inline challenge that disappears after the phone sends its last
   fixture.resizeIframe();
   await vi.advanceTimersByTimeAsync(2_000);
   expect(await wait.response).toEqual({ status: 200, body: "cleared" });
+});
+
+test("rejects an old frame after a challenge dialog replaces its control", async () => {
+  const { fixture, url } = await startFixture();
+  fixture.showDialogChallenge();
+  const first = await request(url, "/frame");
+  expect(first.status).toBe(200);
+  fixture.replaceDialogControl();
+  expect((await click(url, first.revision)).status).toBe(202);
+  expect(fixture.clicks()).toBe(0);
+  const current = await request(url, "/frame");
+  expect((await click(url, current.revision)).status).toBe(200);
+  expect(fixture.clicks()).toBe(1);
 });
 
 test.each(["expired", "tab closed", "session moved on"])(

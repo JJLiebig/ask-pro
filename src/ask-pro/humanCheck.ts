@@ -36,6 +36,9 @@ const VISIBLE_SURFACE = `el => {
   const r = el.getBoundingClientRect(), s = getComputedStyle(el);
   return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
 }`;
+const CHALLENGE_PROMPT = `el => !el.querySelector('textarea,[contenteditable="true"]') &&
+  /\\b(security check|verify you are human|captcha)\\b/i.test(el.textContent || '')`;
+const CHALLENGE_CONTROLS = 'input,button,a,label,[role="checkbox"],[role="button"]';
 const FRAME_REVISION_HEADER = "X-Check-Revision";
 type CheckState = "challenge" | "loading" | "clear";
 type CheckClick = { x: number; y: number; revision: number };
@@ -44,9 +47,10 @@ function checkStateExpression(origin: string) {
   return `(() => {
     if (location.origin === ${JSON.stringify(origin)}) {
       const visible = ${VISIBLE_SURFACE};
+      const hasPrompt = ${CHALLENGE_PROMPT};
       if (document.title.toLowerCase().includes('just a moment')) return 'challenge';
       if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_FRAMES)})).some(visible)) return 'challenge';
-      if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_CONTAINERS)})).some(el => visible(el) && !el.querySelector('textarea,[contenteditable="true"]') && /\\b(security check|verify you are human|captcha)\\b/i.test(el.textContent || ''))) return 'challenge';
+      if (Array.from(document.querySelectorAll(${JSON.stringify(CHALLENGE_CONTAINERS)})).some(el => visible(el) && hasPrompt(el))) return 'challenge';
     }
     return document.readyState === 'loading' || location.href === 'about:blank' ? 'loading' : 'clear';
   })()`;
@@ -78,7 +82,7 @@ export async function startHumanCheckServer(
   const expression = checkStateExpression(options.origin ?? CHATGPT_ORIGIN);
   const waiters = new Set<http.ServerResponse>();
   let monitor: Client | undefined;
-  let client: Client | undefined;
+  let captureClient: Client | undefined;
   let queue: Promise<unknown> = Promise.resolve();
   let finish!: () => void;
   const done = new Promise<void>((resolve) => {
@@ -91,19 +95,19 @@ export async function startHumanCheckServer(
   let navigating = false;
   let revision = 0;
   let lastObservation: string | undefined;
-  async function connect() {
-    if (!client) {
+  async function connectCapture() {
+    if (!captureClient) {
       const connected = await connectToCheckTarget(options);
       if (state !== "watching") {
         await connected.close();
         throw Error("Check unavailable");
       }
-      client = connected;
+      captureClient = connected;
       connected.on("disconnect", () => {
-        if (client === connected) client = undefined;
+        if (captureClient === connected) captureClient = undefined;
       });
     }
-    return client;
+    return captureClient;
   }
   function cancelSettlement() {
     clearTimeout(settleTimer);
@@ -117,7 +121,9 @@ export async function startHumanCheckServer(
     clearTimeout(confirmationTimer);
     server.close();
     server.closeAllConnections();
-    await Promise.all([monitor, client].map((connection) => connection?.close().catch(() => {})));
+    await Promise.all(
+      [monitor, captureClient].map((connection) => connection?.close().catch(() => {})),
+    );
     finish();
   }
 
@@ -227,6 +233,8 @@ export async function startHumanCheckServer(
         let last;
         let watched = new Map();
         const visible = ${VISIBLE_SURFACE};
+        const hasPrompt = ${CHALLENGE_PROMPT};
+        const controls = ${JSON.stringify(CHALLENGE_CONTROLS)};
         const size = new ResizeObserver(observe);
         const visibility = new IntersectionObserver(observe, { trackVisibility: true, delay: 100 });
         function observe(event) {
@@ -236,7 +244,14 @@ export async function startHumanCheckServer(
             : new Map();
           const reloaded = event?.type === 'load' && surfaces.has(event.target) &&
             event.target.matches(${JSON.stringify(CHALLENGE_FRAMES)});
-          let changed = reloaded || surfaces.size !== watched.size;
+          const replacedControl = Array.isArray(event) && event.some(record => {
+            if (record.type !== 'childList') return false;
+            const container = record.target.closest?.(${JSON.stringify(CHALLENGE_CONTAINERS)});
+            if (!surfaces.has(container) || !visible(container) || !hasPrompt(container)) return false;
+            return [...record.addedNodes, ...record.removedNodes].some(node =>
+              node.matches?.(controls) || node.querySelector?.(controls));
+          });
+          let changed = reloaded || replacedControl || surfaces.size !== watched.size;
           for (const el of watched.keys()) {
             if (surfaces.has(el)) continue;
             size.unobserve(el);
@@ -341,9 +356,10 @@ export async function startHumanCheckServer(
           return;
         }
       }
+      const c = monitor;
       if (res.destroyed) return;
-      const c = await connect();
-      if (res.destroyed) return;
+      if (!c) throw Error("Check unavailable");
+      // Validate against navigation events on the same connection used for input.
       // Check immediately before input, so a challenge that cleared meanwhile never receives a click.
       if (point) await c.Page.bringToFront();
       const checkedAt = revision;
@@ -359,11 +375,12 @@ export async function startHumanCheckServer(
         return;
       }
       if (!point) {
+        const capture = await connectCapture();
         // A reloaded viewer cancels capture; disconnect so a stuck capture cannot block its successor.
         const cancel = () => {
           if (!res.writableEnded) {
-            if (client === c) client = undefined;
-            void c.close().catch(() => undefined);
+            if (captureClient === capture) captureClient = undefined;
+            void capture.close().catch(() => undefined);
           }
         };
         res.once("close", cancel);
@@ -372,8 +389,8 @@ export async function startHumanCheckServer(
             cancel();
             return;
           }
-          const capturedAt = revision;
-          const frame = await c.Page.captureScreenshot({ format: "jpeg", quality: 70 });
+          const capturedAt = checkedAt;
+          const frame = await capture.Page.captureScreenshot({ format: "jpeg", quality: 70 });
           // The challenge can redirect during capture; never forward a frame of the page behind it.
           const after = await probe(c);
           if (after !== "challenge" || revision !== capturedAt || state !== "watching") {
