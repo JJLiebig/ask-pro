@@ -617,8 +617,6 @@ async function resumeAskProBrowserSessionWithLease({
       const reason = classifyBrowserError(error);
       const retryAnswers = answersPending && reason === "challenge_detected";
       const currentMetadata = await readBrowserMetadata(paths.browser).catch(() => metadata);
-      const reason = classifyBrowserError(error);
-      const retryAnswers = answersPending && reason === "challenge_detected";
       await writeAskProBrowserMetadata({
         cwd,
         sessionId,
