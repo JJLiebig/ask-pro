@@ -488,11 +488,13 @@ async function printAuthInstructions(
     if (!chromePort || !chromeTargetId)
       throw new Error("Challenge browser is unavailable. Resume ask-pro to reopen it.");
     const answers = options.answers;
-    const resume =
+    const retryAnswers =
       answers !== undefined &&
-      (await readAskProStatus({ cwd, sessionId })).status.status === "AWAITING_ANSWERS"
-        ? `${resumeCommand} --answers ${quoteCommandArg(answers)}`
-        : resumeCommand;
+      (await readAskProStatus({ cwd, sessionId })).status.status === "AWAITING_ANSWERS";
+    const replayStdin = retryAnswers && answers === "-";
+    const resume = retryAnswers
+      ? `${resumeCommand} --answers ${quoteCommandArg(answers)}`
+      : resumeCommand;
     const checkUrl = await launchHumanCheck({
       chromePort,
       targetId: chromeTargetId,
@@ -504,7 +506,11 @@ async function printAuthInstructions(
       state: "needs_human_check",
       check_url: checkUrl,
       action: "human_check_then_resume",
-      resume,
+      resume: replayStdin ? undefined : resume,
+      reply: replayStdin ? `${resumeCommand} --answers <answers.json>` : undefined,
+      help: replayStdin
+        ? "After completing the browser check, pipe the same JSON again or pass an answers file."
+        : undefined,
     });
     return;
   }
@@ -549,6 +555,8 @@ function mergeStatusOptions(
 }
 
 function printStatusRecord(status: AskProStatusFile, extra: AskProToonFields = {}): void {
+  const awaitingAnswersAfterCheck =
+    status.status === "AWAITING_ANSWERS" && extra.state === "needs_human_check";
   writeToon("ask_pro", {
     session: status.sessionId,
     state: normalizeState(status.status),
@@ -565,7 +573,8 @@ function printStatusRecord(status: AskProStatusFile, extra: AskProToonFields = {
         ? "In the opened ChatGPT page, install GitHub if needed, connect your account, review repository access, then resume."
         : undefined,
     action: actionForStatus(status),
-    resume: shouldPrintResume(status) ? status.resumeCommand : undefined,
+    resume:
+      !awaitingAnswersAfterCheck && shouldPrintResume(status) ? status.resumeCommand : undefined,
     harvest: shouldPrintHarvest(status) ? status.harvestCommand : undefined,
     retry:
       status.reason === "stopped_without_answer"
