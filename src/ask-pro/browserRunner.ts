@@ -14,7 +14,8 @@ import {
   resolveAskProAgentId,
 } from "../browser/profilePaths.js";
 import { prepareAskProBrowserProfile } from "../browser/profileMigration.js";
-import { runBrowserMode, type BrowserRunResult } from "../browserMode.js";
+import { runBrowserMode, type BrowserRunOptions, type BrowserRunResult } from "../browserMode.js";
+import { isHeadlessLinux } from "../browser/config.js";
 import { closeTab } from "../browser/chromeLifecycle.js";
 import { resumeBrowserSession } from "../browser/reattach.js";
 import type { BrowserLogger } from "../browser/types.js";
@@ -30,6 +31,7 @@ import {
 } from "./session.js";
 import { harvestLatestAssistantZip, writeResponseZipManifest } from "./responseZip.js";
 import { withSessionControllerLease } from "./sessionControllerLease.js";
+import { resumeHumanCheck, saveHumanCheck, type HumanCheckTarget } from "./humanCheck.js";
 
 const DEFAULT_TIMEOUT_MS = 180 * 60 * 1000;
 const MANUAL_LOGIN_WAIT_MS = 10 * 60 * 1000;
@@ -46,6 +48,7 @@ export interface RunAskProBrowserSessionOptions {
   allowStartMinimized?: boolean;
   verbose?: boolean;
   answers?: string;
+  resumeTarget?: BrowserRunOptions["resumeTarget"];
 }
 
 export async function runAskProBrowserSession(
@@ -64,6 +67,7 @@ async function runAskProBrowserSessionWithLease({
   agentId: agentIdOverride,
   allowStartMinimized = true,
   verbose,
+  resumeTarget,
 }: RunAskProBrowserSessionOptions): Promise<BrowserRunResult> {
   const paths = getAskProSessionPaths(cwd, sessionId);
   const prompt = await readAskProPrompt({ cwd, sessionId });
@@ -104,6 +108,7 @@ async function runAskProBrowserSessionWithLease({
     await updateAskProStatus({ cwd, sessionId, status: "WAITING" });
     const result = await runBrowserMode({
       prompt,
+      resumeTarget,
       attachments: [
         {
           path: paths.contextZip,
@@ -279,7 +284,10 @@ async function runAskProBrowserSessionWithLease({
     }
 
     if (isAuthGateError(error)) {
-      const currentMetadata = await readBrowserMetadata(paths.browser).catch(() => ({}));
+      const currentMetadata = await readBrowserMetadata(paths.browser).catch(
+        (): AskProBrowserMetadata => ({}),
+      );
+      const reason = classifyBrowserError(error);
       await writeAskProBrowserMetadata({
         cwd,
         sessionId,
@@ -293,16 +301,22 @@ async function runAskProBrowserSessionWithLease({
           url: chatgptUrl,
           acceptLanguage: ASK_PRO_ACCEPT_LANGUAGE,
           chromeMode: "launched",
-          reason: classifyBrowserError(error),
+          reason,
         },
       });
       await updateAskProStatus({
         cwd,
         sessionId,
         status: "NEEDS_USER_AUTH",
-        reason: classifyBrowserError(error),
+        reason,
       });
-      throw new AskProNeedsAuthError(sessionId, browserProfile, classifyBrowserError(error));
+      throw await authHandoff(
+        paths.dir,
+        sessionId,
+        browserProfile,
+        reason,
+        currentMetadata.runtime,
+      );
     }
 
     if (error instanceof AssistantQuestionsError) {
@@ -398,12 +412,29 @@ async function resumeAskProBrowserSessionWithLease({
         ? ASK_PRO_CHATGPT_URL
         : (metadata.url ?? ASK_PRO_TEMPORARY_CHATGPT_URL);
   const fallbackProfile = await resolveResumeBrowserProfile(metadata);
+  const headless = isHeadlessLinux();
+  const waitingForHumanCheck =
+    headless &&
+    (sessionStatus.status === "NEEDS_USER_AUTH" || sessionStatus.status === "AWAITING_ANSWERS") &&
+    sessionStatus.reason === "challenge_detected";
+  const checkTarget = waitingForHumanCheck ? humanCheckTarget(metadata.runtime) : undefined;
+  const check = await resumeHumanCheck(paths.dir, checkTarget);
+  if (check === "challenge" || check === "loading") {
+    throw await authHandoff(
+      paths.dir,
+      sessionId,
+      fallbackProfile,
+      "challenge_detected",
+      metadata.runtime,
+    );
+  }
+  const resumeTarget = check === "clear" ? checkTarget : undefined;
   if (
     (sessionStatus.status === "NEEDS_USER_AUTH" && metadata.runtime?.promptSubmitted === false) ||
     sessionStatus.status === "NEEDS_GITHUB_CONNECTION" ||
     (sessionStatus.github && metadata.runtime?.githubCheckPending === true)
   ) {
-    await closeSessionBrowserTab(cwd, sessionId, logger);
+    if (!resumeTarget) await closeSessionBrowserTab(cwd, sessionId, logger);
     await runAskProBrowserSessionWithLease({
       cwd,
       sessionId,
@@ -412,6 +443,7 @@ async function resumeAskProBrowserSessionWithLease({
       agentId: metadata.agentId ?? null,
       allowStartMinimized: false,
       verbose,
+      resumeTarget,
     });
     return;
   }
@@ -506,7 +538,9 @@ async function resumeAskProBrowserSessionWithLease({
           await fs.rm(path.join(paths.dir, "QUESTIONS.json"), { force: true });
         },
         promptPreview: prompt,
+        humanCheck: headless ? (waitingForHumanCheck ? "resume" : "handoff") : undefined,
         chromeModeCb: async (chromeMode, runtime) => {
+          if (runtime) metadata.runtime = runtime;
           const current = await readBrowserMetadata(paths.browser).catch(() => metadata);
           await writeAskProBrowserMetadata({
             cwd,
@@ -604,7 +638,13 @@ async function resumeAskProBrowserSessionWithLease({
         status: retryAnswers ? "AWAITING_ANSWERS" : "NEEDS_USER_AUTH",
         reason,
       });
-      throw new AskProNeedsAuthError(sessionId, fallbackProfile, reason);
+      throw await authHandoff(
+        paths.dir,
+        sessionId,
+        fallbackProfile,
+        reason,
+        currentMetadata.runtime,
+      );
     }
     if (error instanceof AssistantQuestionsError) {
       await writeAskProQuestions(paths.dir, error.questions);
@@ -1007,10 +1047,32 @@ export class AskProNeedsAuthError extends Error {
     readonly sessionId: string,
     readonly browserProfile: string,
     readonly reason: string,
+    readonly checkUrl?: string,
   ) {
     super("ChatGPT authentication is required.");
     this.name = "AskProNeedsAuthError";
   }
+}
+
+function humanCheckTarget(runtime: AskProBrowserMetadata["runtime"]): HumanCheckTarget | undefined {
+  const { chromePort, chromeTargetId } = runtime ?? {};
+  if (chromePort && chromeTargetId) return { chromePort, targetId: chromeTargetId };
+}
+
+async function authHandoff(
+  dir: string,
+  sessionId: string,
+  profile: string,
+  reason: string,
+  runtime: AskProBrowserMetadata["runtime"],
+): Promise<AskProNeedsAuthError> {
+  let checkUrl: string | undefined;
+  if (reason === "challenge_detected" && isHeadlessLinux()) {
+    const target = humanCheckTarget(runtime);
+    if (!target) throw new Error("Challenge browser is unavailable. Resume ask-pro to reopen it.");
+    checkUrl = await saveHumanCheck(dir, { ...target, profile });
+  }
+  return new AskProNeedsAuthError(sessionId, profile, reason, checkUrl);
 }
 
 function buildAskProBrowserLogger(

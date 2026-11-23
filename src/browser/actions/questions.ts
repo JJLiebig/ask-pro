@@ -16,13 +16,15 @@ export class AssistantQuestionsError extends Error {
   }
 }
 
+const QUESTION_CARD_SELECTOR = '[data-codex-composer-request-navigation="true"]';
+
 // This function also runs in Chrome; keep it independent of module state.
 async function questionCards(
+  selector: string,
   answers?: Array<number | string>,
   expected?: AssistantQuestion[],
   submission = { started: false },
 ) {
-  const selector = '[data-codex-composer-request-navigation="true"]';
   const visible = (node: Element) => {
     const rect = node.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0 && !node.closest('[inert], [aria-hidden="true"]');
@@ -162,8 +164,31 @@ export function buildQuestionCardsExpression(
   expected?: AssistantQuestion[],
 ) {
   // tsx preserves function names with __name; Chrome only needs the function itself.
-  const call = `(${questionCards.toString()})(${JSON.stringify(answers) ?? "undefined"}, ${JSON.stringify(expected) ?? "undefined"}, submission)`;
+  const call = `(${questionCards.toString()})(${JSON.stringify(QUESTION_CARD_SELECTOR)}, ${JSON.stringify(answers) ?? "undefined"}, ${JSON.stringify(expected) ?? "undefined"}, submission)`;
   return `(() => { const __name = (fn) => fn; const submission = { started: false }; return ${answers ? `${call}.then(questions => ({ questions, started: submission.started }), error => ({ error: String(error), started: submission.started }))` : call}; })()`;
+}
+
+export async function waitForQuestionCard(Runtime: ChromeClient["Runtime"]): Promise<void> {
+  const result = await Runtime.evaluate({
+    expression: `new Promise(resolve => {
+      const ready = () => Array.from(document.querySelectorAll(${JSON.stringify(QUESTION_CARD_SELECTOR)})).some(node => {
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && !node.closest('[inert], [aria-hidden="true"]');
+      });
+      if (ready()) { resolve(); return; }
+      const observer = new MutationObserver(() => { if (ready()) finish(); });
+      function finish() {
+        clearTimeout(deadline);
+        observer.disconnect();
+        resolve();
+      }
+      const deadline = setTimeout(finish, 5000);
+      observer.observe(document, { subtree: true, childList: true, attributes: true });
+    })`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  if (result.exceptionDetails) throw new Error("Unable to wait for ChatGPT's question card.");
 }
 
 export async function readAssistantQuestions(Runtime: ChromeClient["Runtime"]) {

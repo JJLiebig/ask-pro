@@ -2,6 +2,7 @@ import { AssistantStoppedError, BrowserAutomationError } from "./errors.js";
 import {
   AssistantQuestionsError,
   answerAssistantQuestions,
+  waitForQuestionCard,
   type AssistantQuestion,
 } from "./actions/questions.js";
 import { createAssistantContinuation } from "./actions/assistantResponse.js";
@@ -85,6 +86,7 @@ export interface ReattachDeps {
     mode: ReattachResult["chromeMode"],
     runtime?: BrowserRuntimeMetadata,
   ) => Promise<void> | void;
+  humanCheck?: "handoff" | "resume";
   waitForAssistantResponse?: typeof waitForAssistantResponse;
   captureAssistantMarkdown?: typeof captureAssistantMarkdown;
   recoverSession?: (
@@ -197,6 +199,25 @@ async function closeManagedChromeIfUnused(
   );
 }
 
+function savedConversationId(runtime: BrowserRuntimeMetadata) {
+  return runtime.conversationId ?? extractConversationIdFromUrl(runtime.tabUrl ?? "");
+}
+
+async function readTabUrl(Runtime: ChromeClient["Runtime"]) {
+  const { result } = await Runtime.evaluate({ expression: "location.href", returnByValue: true });
+  return typeof result.value === "string" ? result.value : "";
+}
+
+async function verifySavedConversation(
+  Runtime: ChromeClient["Runtime"],
+  runtime: BrowserRuntimeMetadata,
+) {
+  const expectedId = savedConversationId(runtime);
+  if (expectedId && extractConversationIdFromUrl(await readTabUrl(Runtime)) !== expectedId) {
+    throw new Error("Unable to open the saved ChatGPT conversation.");
+  }
+}
+
 export async function resumeBrowserSession(
   runtime: BrowserRuntimeMetadata,
   config: BrowserSessionConfig | undefined,
@@ -235,6 +256,7 @@ export async function resumeBrowserSession(
     : null;
   let closeConnection: (() => Promise<void>) | null = null;
   let answeringQuestions = false;
+  let humanCheckRuntime: BrowserRuntimeMetadata | undefined;
 
   try {
     const liveRuntime = await refreshAttachRuntime(runtime, logger).catch(() => runtime);
@@ -258,6 +280,12 @@ export async function resumeBrowserSession(
         })) as TargetInfoLite[]);
     const targetList = (await listTargets()) as TargetInfoLite[];
     const target = pickTarget(targetList, liveRuntime);
+    if (
+      deps.humanCheck === "resume" &&
+      (!liveRuntime.chromeTargetId || target?.targetId !== liveRuntime.chromeTargetId)
+    ) {
+      throw Error("Saved challenge tab is unavailable.");
+    }
     const connection =
       browserWSEndpoint && !deps.connect
         ? await connectToRemoteChromeTarget(host, port ?? 9222, logger, {
@@ -319,22 +347,32 @@ export async function resumeBrowserSession(
     }
 
     const ensureConversationOpen = async () => {
-      const { result } = await Runtime.evaluate({
-        expression: "location.href",
-        returnByValue: true,
-      });
-      const href = typeof result?.value === "string" ? result.value : "";
-      if (href.includes("/c/")) {
-        const currentId = extractConversationIdFromUrl(href);
-        if (!runtime.conversationId || (currentId && currentId === runtime.conversationId)) {
+      const href = await readTabUrl(Runtime);
+      const expectedId = savedConversationId(runtime);
+      if (
+        href.includes("/c/") &&
+        (!expectedId || extractConversationIdFromUrl(href) === expectedId)
+      ) {
+        return;
+      }
+      if (deps.humanCheck === "resume") {
+        const url =
+          buildConversationUrl(runtime, resolvedConfig.url) ??
+          buildConversationUrl({ conversationId: expectedId }, resolvedConfig.url);
+        if (url) {
+          await navigateToChatGPT(Page, Runtime, url, logger);
+          await ensureNotBlocked(Runtime, resolvedConfig.headless, logger);
+          if (deps.questionAnswers) {
+            await verifySavedConversation(Runtime, runtime);
+            await waitForQuestionCard(Runtime);
+          }
           return;
         }
       }
       const opened = await openConversationFromSidebarWithRetry(
         Runtime,
         {
-          conversationId:
-            runtime.conversationId ?? extractConversationIdFromUrl(runtime.tabUrl ?? ""),
+          conversationId: expectedId,
           preferProjects: true,
           promptPreview: deps.promptPreview,
         },
@@ -355,7 +393,14 @@ export async function resumeBrowserSession(
       pingTimeoutMs,
       "Reattach target did not respond",
     );
+    if (deps.humanCheck && ownsConnectedTarget) {
+      humanCheckRuntime = { ...liveRuntime, chromePort: port, chromeHost: host };
+      await ensureNotBlocked(Runtime, resolvedConfig.headless, logger);
+    }
     await ensureConversationOpen();
+    if (deps.humanCheck === "resume" || (deps.humanCheck && deps.questionAnswers)) {
+      await verifySavedConversation(Runtime, runtime);
+    }
     let minTurnIndex = await readConversationTurnIndex(Runtime, logger);
     if (deps.questionAnswers) {
       answeringQuestions = true;
@@ -448,6 +493,14 @@ export async function resumeBrowserSession(
     await closeConnection?.().catch(() => undefined);
     await releaseReattachRunLease(reattachRunLease, logger);
     reattachRunLease = null;
+    if (
+      humanCheckRuntime &&
+      error instanceof BrowserAutomationError &&
+      error.details?.stage === "cloudflare-challenge"
+    ) {
+      await deps.chromeModeCb?.("reused_devtools", humanCheckRuntime);
+      throw error;
+    }
     if (
       error instanceof AssistantStoppedError ||
       error instanceof AssistantQuestionsError ||
@@ -699,6 +752,9 @@ async function resumeBrowserSessionViaNewChrome(
       await waitForLocationChange(Runtime, 15_000);
     }
 
+    if (deps.humanCheck === "resume" || (deps.humanCheck && deps.questionAnswers)) {
+      await verifySavedConversation(Runtime, runtime);
+    }
     const waitForResponse = deps.waitForAssistantResponse ?? waitForAssistantResponse;
     const captureMarkdown = deps.captureAssistantMarkdown ?? captureAssistantMarkdown;
     const timeoutMs = resolved.timeoutMs ?? 120_000;

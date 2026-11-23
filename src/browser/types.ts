@@ -85,6 +85,8 @@ export interface BrowserAutomationConfig {
 export interface BrowserRunOptions {
   prompt: string;
   attachments?: BrowserAttachment[];
+  /** A managed tab preserved before the prompt was submitted. */
+  resumeTarget?: { chromePort: number; targetId: string };
   /**
    * Optional secondary submission to try if the initial prompt is rejected by ChatGPT
    * (e.g. inline file paste exceeds composer limits). Intended for auto inline->upload fallback.

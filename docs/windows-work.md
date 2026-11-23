@@ -146,6 +146,7 @@ Future Windows gotchas belong here.
   attempt.
 
 - The headless human-check viewer is limited to a single challenged tab, frames
-  and pointer clicks. Its link survives reload; it closes automatically on clear
-  or expires after 15 minutes. Its worker retains a browser-run lease across CLI
-  exit. The local fake-checkbox smoke runs on Windows without real auth or queries.
+  and pointer clicks. Its link survives reload. The viewer closes after clearance,
+  when the run moves on, when the Chrome tab closes, or after 24 hours. Its worker
+  retains a browser-run lease across CLI exit. The local fake-checkbox smoke runs
+  on Windows without real auth or queries.

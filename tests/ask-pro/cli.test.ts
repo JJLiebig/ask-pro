@@ -512,7 +512,7 @@ describe("ask-pro cli", () => {
         if (process.platform === "linux") {
           const browserPath = path.join(sessionDir, "browser.json");
           const browser = JSON.parse(await fs.readFile(browserPath, "utf8"));
-          const checkUrl = "http://fixture.test/check";
+          const checkUrl = `http://fixture.test:1234/#${"0".repeat(64)}`;
           await Promise.all([
             fs.writeFile(browserPath, JSON.stringify({ ...browser, reason: "challenge_detected" })),
             fs.writeFile(
@@ -526,6 +526,7 @@ describe("ask-pro cli", () => {
             { cwd, env: { ...process.env, DISPLAY: "", WAYLAND_DISPLAY: "" } },
           );
           expect(checking).toContain("  state: needs_human_check\n");
+          expect(checking).toContain("  action: send_check_link_and_resume\n");
           expect(checking).toContain(`  check_url: "${checkUrl}"\n`);
           expect(checking).toContain("--answers <answers.json>");
           expect(checking).not.toContain("\n  resume: ");

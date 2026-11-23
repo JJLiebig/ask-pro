@@ -480,6 +480,53 @@ describe("navigation challenge detection", () => {
   );
 });
 
+describe("project prompt navigation after a human check", () => {
+  const fallbackUrl = "https://chatgpt.com/";
+  const url = `${fallbackUrl}g/project`;
+  const logger = () => {};
+
+  test.each([
+    { locationAfterLogin: url, composerRedirects: false, loaded: [] },
+    { locationAfterLogin: fallbackUrl, composerRedirects: false, loaded: [url] },
+    { locationAfterLogin: url, composerRedirects: true, loaded: [fallbackUrl] },
+  ])(
+    "loads $loaded for $locationAfterLogin and composerRedirects=$composerRedirects",
+    async ({ locationAfterLogin, composerRedirects, loaded }) => {
+      let liveUrl = locationAfterLogin;
+      const navigate = vi.fn(async ({ url }: { url: string }) => {
+        liveUrl = url;
+      });
+      const Page = { navigate } as never;
+      const Runtime = {
+        evaluate: async ({ expression }: { expression: string }) => ({
+          result: { value: expression === "location.href" ? liveUrl : "complete" },
+        }),
+      } as never;
+      const ensurePromptReady = vi.fn(async () => {});
+      if (composerRedirects) {
+        ensurePromptReady.mockImplementationOnce(async () => {
+          liveUrl = fallbackUrl;
+          throw new Error("Fixture composer never loaded.");
+        });
+      }
+
+      await expect(
+        navigateToPromptReadyWithFallback(
+          Page,
+          Runtime,
+          { url, fallbackUrl, timeoutMs: 1_000, headless: true, logger },
+          {
+            navigateToChatGPT: __test__.preservePromptNavigation(url),
+            ensureNotBlocked: async () => {},
+            ensurePromptReady,
+          },
+        ),
+      ).resolves.toEqual({ usedFallback: composerRedirects });
+      expect(navigate.mock.calls.map(([target]) => target.url)).toEqual(loaded);
+    },
+  );
+});
+
 describe("human intervention detection", () => {
   test("detects login/challenge reasons from the page probe", async () => {
     const Runtime = {
