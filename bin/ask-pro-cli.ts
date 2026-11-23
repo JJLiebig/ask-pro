@@ -487,6 +487,12 @@ async function printAuthInstructions(
     const { chromePort, chromeTargetId } = metadata.runtime ?? {};
     if (!chromePort || !chromeTargetId)
       throw new Error("Challenge browser is unavailable. Resume ask-pro to reopen it.");
+    const answers = options.answers;
+    const resume =
+      answers !== undefined &&
+      (await readAskProStatus({ cwd, sessionId })).status.status === "AWAITING_ANSWERS"
+        ? `${resumeCommand} --answers ${quoteCommandArg(answers)}`
+        : resumeCommand;
     const checkUrl = await launchHumanCheck({
       chromePort,
       targetId: chromeTargetId,
@@ -498,7 +504,7 @@ async function printAuthInstructions(
       state: "needs_human_check",
       check_url: checkUrl,
       action: "human_check_then_resume",
-      resume: resumeCommand,
+      resume,
     });
     return;
   }
@@ -693,7 +699,7 @@ async function readBrowserPreflightForSession(
   const profile = profileMode(profileDir);
   const questions: AskProToonFields = {};
   if (
-    metadata.status === "needs_user_auth" &&
+    (metadata.status === "needs_user_auth" || metadata.status === "awaiting_answers") &&
     metadata.reason === "challenge_detected" &&
     isHeadlessLinux()
   ) {
