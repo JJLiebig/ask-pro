@@ -50,6 +50,11 @@ function fakeChallenge() {
   const events = new EventEmitter();
   const client = Object.assign(events, {
     close: async () => {},
+    send: async () => {},
+    Target: {
+      attachedToTarget: () => {},
+      detachedFromTarget: () => {},
+    },
     Runtime: {
       enable: async () => {},
       bindingCalled: (handler: (...params: unknown[]) => void) => events.on("binding", handler),
@@ -63,11 +68,6 @@ function fakeChallenge() {
     Page: {
       enable: async () => {},
       getFrameTree: async () => ({ frameTree: { frame: { id: "main" } } }),
-      frameStartedLoading: (handler: (...params: unknown[]) => void) =>
-        events.on("starting", handler),
-      frameNavigated: (handler: (...params: unknown[]) => void) => events.on("navigating", handler),
-      frameStoppedLoading: (handler: (...params: unknown[]) => void) =>
-        events.on("loaded", handler),
       addScriptToEvaluateOnNewDocument: async ({ source }: { source: string }) => {
         installObserver = () => {
           const window = {
@@ -125,17 +125,17 @@ function fakeChallenge() {
   return {
     origin,
     clicks: () => clicks,
-    startNavigation: () => events.emit("starting", { frameId: "main" }),
+    startNavigation: () => events.emit("Page.frameStartedLoading", { frameId: "main" }),
     loadFollowUp: () => {
       document.title = "Just a moment...";
-      events.emit("navigating", { frame: { id: "main" } });
+      events.emit("Page.frameNavigated", { frame: { id: "main" } });
       installObserver();
-      events.emit("loaded", { frameId: "main" });
+      events.emit("Page.frameStoppedLoading", { frameId: "main" });
     },
     commitInteractivePage: () => {
       document.title = "Fixture app";
       document.readyState = "interactive";
-      events.emit("navigating", { frame: { id: "main" } });
+      events.emit("Page.frameNavigated", { frame: { id: "main" } });
       installObserver();
     },
     showInlineChallenge: () => {
@@ -148,6 +148,9 @@ function fakeChallenge() {
       onMutation();
     },
     reloadInlineChallenge: () => onLoad({ type: "load", target: iframe }),
+    commitChildNavigation: () => {
+      events.emit("Page.frameNavigated", { frame: { id: "child" } }, "child-session");
+    },
     switchVisibleChallenge: () => {
       visible = false;
       followUpVisible = true;
@@ -295,6 +298,7 @@ test("settles an inline challenge that disappears after the phone sends its last
   await wait.attached;
   for (const replace of [
     fixture.replaceInlineChallenge,
+    fixture.commitChildNavigation,
     fixture.reloadInlineChallenge,
     fixture.switchVisibleChallenge,
   ]) {

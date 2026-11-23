@@ -154,6 +154,21 @@ export async function startHumanCheckServer(
 
   async function watchTab() {
     const c = await connectToCheckTarget(options);
+    function invalidateFrame() {
+      revision += 1;
+    }
+    function watchChildFrames(sessionId?: string) {
+      return c.send(
+        "Target.setAutoAttach",
+        {
+          autoAttach: true,
+          waitForDebuggerOnStart: false,
+          flatten: true,
+          filter: [{ type: "iframe" }],
+        },
+        sessionId,
+      );
+    }
     monitor = c;
     c.on("disconnect", () => {
       if (state === "watching") void close();
@@ -165,24 +180,35 @@ export async function startHumanCheckServer(
         frame: { id: mainFrame },
       },
     } = await c.Page.getFrameTree();
-    c.Page.frameStartedLoading(({ frameId }) => {
-      if (frameId !== mainFrame) return;
+    c.on("Page.frameStartedLoading", ({ frameId }, sessionId) => {
+      invalidateFrame();
+      if (sessionId || frameId !== mainFrame) return;
       navigating = true;
       observe("loading");
     });
-    c.Page.frameNavigated(({ frame }) => {
-      if (frame.parentId) return;
+    c.on("Page.frameNavigated", ({ frame }, sessionId) => {
+      invalidateFrame();
+      if (sessionId || frame.parentId) return;
       mainFrame = frame.id;
       navigating = false;
       observe("loading");
       void probe(c).catch(() => {});
     });
-    c.Page.frameStoppedLoading(({ frameId }) => {
-      if (frameId !== mainFrame || !navigating) return;
+    c.on("Page.frameStoppedLoading", ({ frameId }, sessionId) => {
+      if (sessionId || frameId !== mainFrame || !navigating) return;
       // A navigation can end without committing a replacement document.
       navigating = false;
       void probe(c).catch(() => {});
     });
+    // Cross-origin frames can have their own DevTools session. Listen only for navigation lifecycle.
+    c.Target.attachedToTarget(({ sessionId }) => {
+      invalidateFrame();
+      void Promise.all([c.send("Page.enable", {}, sessionId), watchChildFrames(sessionId)]).catch(
+        () => {},
+      );
+    });
+    c.Target.detachedFromTarget(invalidateFrame);
+    await watchChildFrames();
     c.Runtime.bindingCalled(({ name, payload }) => {
       if (name !== MONITOR_BINDING) return;
       if (payload === "challenge-changed") {
