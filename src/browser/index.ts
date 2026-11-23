@@ -119,6 +119,20 @@ export function shouldPreserveBrowserOnErrorForTest(error: unknown, headless: bo
   return shouldPreserveBrowserOnError(error, headless);
 }
 
+function preservePromptNavigation(projectUrl: string): typeof navigateToChatGPT {
+  return async (page, runtime, url, logger) => {
+    // Reuse the project page only on the first attempt. The homepage retry needs a fresh load.
+    if (url === projectUrl) {
+      const { result } = await runtime.evaluate({
+        expression: "location.href",
+        returnByValue: true,
+      });
+      if (url === result.value) return;
+    }
+    await navigateToChatGPT(page, runtime, url, logger);
+  };
+}
+
 function hasBrowserErrorCode(error: unknown, code: string): boolean {
   return (
     error instanceof BrowserAutomationError &&
@@ -978,15 +992,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
             logger,
           },
           alreadyAtPromptUrl
-            ? {
-                navigateToChatGPT: async (page, runtime, url, log) => {
-                  const { result } = await runtime.evaluate({
-                    expression: "location.href",
-                    returnByValue: true,
-                  });
-                  if (url !== result.value) await navigateToChatGPT(page, runtime, url, log);
-                },
-              }
+            ? { navigateToChatGPT: preservePromptNavigation(config.url) }
             : undefined,
         ),
       );
@@ -3059,6 +3065,7 @@ export const __test__ = {
   isConversationUrl,
   waitForLogin,
   waitForAssistantResponseWithReload,
+  preservePromptNavigation,
 };
 export { syncCookies } from "./cookies.js";
 export {
