@@ -979,6 +979,9 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
       await emitRuntimeHint(true);
     }
 
+    // Manual-login runs reveal Chrome and recover its target in the error handler.
+    const ensurePromptReadyForRun: typeof ensurePromptReady = (runtime, timeoutMs, logger) =>
+      ensurePromptReady(runtime, timeoutMs, logger, { waitForManualLogin: !manualLogin });
     if (config.url !== baseUrl) {
       await raceWithDisconnect(
         navigateToPromptReadyWithFallback(
@@ -991,13 +994,16 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
             headless: config.headless,
             logger,
           },
-          alreadyAtPromptUrl
-            ? { navigateToChatGPT: preservePromptNavigation(config.url) }
-            : undefined,
+          {
+            navigateToChatGPT: alreadyAtPromptUrl
+              ? preservePromptNavigation(config.url)
+              : undefined,
+            ensurePromptReady: ensurePromptReadyForRun,
+          },
         ),
       );
     } else {
-      await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));
+      await raceWithDisconnect(ensurePromptReadyForRun(Runtime, config.inputTimeoutMs, logger));
     }
     logger(
       `Prompt textarea ready (initial focus, ${promptText.length.toLocaleString()} chars queued)`,
@@ -1153,7 +1159,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
           },
         ),
       );
-      await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));
+      await raceWithDisconnect(ensurePromptReadyForRun(Runtime, config.inputTimeoutMs, logger));
       logger(
         `Prompt textarea ready (after model switch, ${promptText.length.toLocaleString()} chars queued)`,
       );
@@ -1282,7 +1288,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     const reloadPromptComposer = async () => {
       logger("[browser] Composer became unresponsive; reloading page and retrying once.");
       await raceWithDisconnect(Page.reload({ ignoreCache: true }));
-      await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));
+      await raceWithDisconnect(ensurePromptReadyForRun(Runtime, config.inputTimeoutMs, logger));
     };
     let baselineTurns: number | null = null;
     let baselineAssistantText: string | null = null;
@@ -1297,7 +1303,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
         reloadPromptComposer,
         prepareFallbackSubmission: async () => {
           await raceWithDisconnect(clearPromptComposer(Runtime, logger));
-          await raceWithDisconnect(ensurePromptReady(Runtime, config.inputTimeoutMs, logger));
+          await raceWithDisconnect(ensurePromptReadyForRun(Runtime, config.inputTimeoutMs, logger));
         },
         logger,
       });

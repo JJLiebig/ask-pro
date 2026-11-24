@@ -39,6 +39,10 @@
 - Use headed Chrome on a managed private Xvfb display on display-less Linux hosts,
   avoiding the headless-only Cloudflare block.
 
+- Return the normal `needs_auth` response when ChatGPT redirects to sign-in
+  during prompt loading. On Linux without a display, provide the
+  `--import-session` command without waiting for manual sign-in.
+
 - Limit managed Chrome's disk cache to 16 MiB and clear idle profiles' page and
   code caches before launch, preserving sign-in data and active browser runs.
 

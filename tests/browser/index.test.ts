@@ -14,6 +14,43 @@ import {
 } from "../../src/browser/pageActions.js";
 import { BrowserAutomationError } from "../../src/browser/errors.js";
 
+function createNavigationPage() {
+  const document = {
+    readyState: "complete",
+    title: "ChatGPT",
+    body: null,
+    promptVisible: false,
+    querySelector() {
+      return this.promptVisible ? { hasAttribute: () => false } : null;
+    },
+    querySelectorAll: () => [],
+  };
+  const location = new URL("https://chatgpt.com/");
+  const fetch = vi.fn(async () => ({
+    status: 200,
+    redirected: false,
+    url: "https://chatgpt.com/backend-api/me",
+  }));
+  const Page = {
+    navigate: async ({ url }: { url: string }) => {
+      document.title = "ChatGPT";
+      location.href = url;
+    },
+  } as never;
+  const Runtime = {
+    evaluate: async ({ expression }: { expression: string }) => ({
+      result: {
+        value: await new Function("document", "location", "fetch", `return ${expression}`)(
+          document,
+          location,
+          fetch,
+        ),
+      },
+    }),
+  } as never;
+  return { document, location, fetch, Page, Runtime };
+}
+
 describe("shouldPreserveBrowserOnErrorForTest", () => {
   test("preserves the browser for headful cloudflare challenge errors", () => {
     const error = new BrowserAutomationError("Cloudflare challenge detected.", {
@@ -415,35 +452,13 @@ describe("navigation challenge detection", () => {
     "reports a challenge after login and the full composer wait (temporary chat: %s)",
     async (temporary) => {
       vi.useFakeTimers();
+      vi.stubEnv("DISPLAY", ":1");
       try {
         const baseUrl = "https://chatgpt.com/";
         const url = temporary ? `${baseUrl}?temporary-chat=true` : baseUrl;
+        const challengeUrl = temporary ? `${baseUrl}auth/login?next=%2F` : url;
         const timeoutMs = 1_000;
-        const document = {
-          readyState: "complete",
-          title: "ChatGPT",
-          body: null,
-          querySelector: () => null,
-          querySelectorAll: () => [],
-        };
-        const location = { href: "about:blank", pathname: "/" };
-        const Page = {
-          navigate: async ({ url }: { url: string }) => {
-            document.title = "ChatGPT";
-            location.href = url;
-          },
-        } as never;
-        const Runtime = {
-          evaluate: async ({ expression }: { expression: string }) => ({
-            result: {
-              value: await new Function("document", "location", "fetch", `return ${expression}`)(
-                document,
-                location,
-                async () => ({ status: 200 }),
-              ),
-            },
-          }),
-        } as never;
+        const { document, location, Page, Runtime } = createNavigationPage();
         const logger = () => {};
 
         await navigateToChatGPT(Page, Runtime, baseUrl, logger);
@@ -463,21 +478,95 @@ describe("navigation challenge detection", () => {
 
         setTimeout(() => {
           document.title = "Just a moment...";
+          location.href = challengeUrl;
         }, 200);
         await vi.advanceTimersByTimeAsync(timeoutMs - 1);
         const waiting = Symbol("waiting");
         expect(await Promise.race([outcome, Promise.resolve(waiting)])).toBe(waiting);
-        await vi.runAllTimersAsync();
+        await vi.advanceTimersByTimeAsync(1);
 
-        const error = await outcome;
+        const error = await Promise.race([outcome, Promise.resolve(waiting)]);
         expect(error).toBeInstanceOf(BrowserAutomationError);
         expect(error).toMatchObject({ details: { stage: "cloudflare-challenge" } });
-        expect(location.href).toBe(url);
+        expect(location.href).toBe(challengeUrl);
       } finally {
         vi.useRealTimers();
+        vi.unstubAllEnvs();
       }
     },
   );
+});
+
+describe("prompt readiness after a login redirect", () => {
+  test.runIf(process.platform === "linux").each([
+    { loginUrl: "https://chatgpt.com/auth/login?next=%2F", temporary: false },
+    { loginUrl: "https://auth.openai.com/authorize", temporary: true },
+  ])(
+    "reports login required at the composer deadline on $loginUrl",
+    async ({ loginUrl, temporary }) => {
+      vi.useFakeTimers();
+      vi.stubEnv("DISPLAY", "");
+      vi.stubEnv("WAYLAND_DISPLAY", "");
+      try {
+        const { location, Page, Runtime } = createNavigationPage();
+        const logger = () => {};
+        const timeoutMs = 1_000;
+        await ensureLoggedIn(Runtime, logger);
+        const ready = temporary
+          ? navigateToPromptReadyWithFallback(Page, Runtime, {
+              url: "https://chatgpt.com/?temporary-chat=true",
+              fallbackUrl: "https://chatgpt.com/",
+              timeoutMs,
+              headless: false,
+              logger,
+            })
+          : ensurePromptReady(Runtime, timeoutMs, logger);
+        const outcome = ready.catch((error: unknown) => error);
+        setTimeout(() => {
+          location.href = loginUrl;
+        }, 200);
+
+        await vi.advanceTimersByTimeAsync(timeoutMs);
+        const error = await Promise.race([outcome, Promise.resolve("still waiting")]);
+        expect(error).toBeInstanceOf(BrowserAutomationError);
+        expect(error).toMatchObject({ details: { stage: "login-required" } });
+        expect(location.href).toBe(loginUrl);
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllEnvs();
+      }
+    },
+  );
+
+  test.each(["inline", "caller"])("supports %s desktop sign-in recovery", async (recovery) => {
+    vi.useFakeTimers();
+    vi.stubEnv("DISPLAY", ":1");
+    try {
+      const { document, location, Runtime } = createNavigationPage();
+      location.href = "https://chatgpt.com/auth/login?next=%2F";
+      const waitForManualLogin = recovery === "inline";
+      const outcome = ensurePromptReady(Runtime, 1_000, () => {}, { waitForManualLogin }).catch(
+        (error: unknown) => error,
+      );
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      const result = await Promise.race([outcome, Promise.resolve("still waiting")]);
+      if (!waitForManualLogin) {
+        expect(result).toBeInstanceOf(BrowserAutomationError);
+        expect(result).toMatchObject({ details: { stage: "login-required" } });
+        return;
+      }
+
+      expect(result).toBe("still waiting");
+      location.href = "https://chatgpt.com/";
+      document.promptVisible = true;
+      await vi.advanceTimersByTimeAsync(200);
+      expect(await outcome).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe("project prompt navigation after a human check", () => {
@@ -678,6 +767,30 @@ describe("login recovery reveal hook", () => {
     expect(logger).toHaveBeenCalledWith(expect.stringContaining("url=https://auth.openai.com"));
     expect(logger.mock.calls.flat().join("\n")).not.toContain("secret");
   });
+
+  test.each(["page", "fetch"])(
+    "rejects a 200 login probe after a %s redirect to sign-in",
+    async (source) => {
+      vi.useFakeTimers();
+      try {
+        const { fetch, location, Runtime } = createNavigationPage();
+        const loginUrl = "https://chatgpt.com/auth/login?next=%2F";
+        fetch.mockImplementationOnce(async () => {
+          if (source === "page") {
+            location.href = loginUrl;
+            return { status: 200, redirected: false, url: "https://chatgpt.com/backend-api/me" };
+          }
+          return { status: 200, redirected: true, url: loginUrl };
+        });
+
+        await expect(ensureLoggedIn(Runtime, () => {}, { passive: true })).rejects.toThrow(
+          /session not detected/i,
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   test("calls auth-needed hook before non-manual login failures escape", async () => {
     const onAuthNeeded = vi.fn();
